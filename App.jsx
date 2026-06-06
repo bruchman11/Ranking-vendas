@@ -556,10 +556,6 @@ function LoginScreen({ sellers, onLogin }) {
           <span style={{fontSize:13,fontWeight:600,color:"var(--text2)"}}>Lembrar acesso neste dispositivo</span>
         </label>
         <button className="btn btn-primary" onClick={doLogin}>Entrar →</button>
-        <div style={{marginTop:16,textAlign:"center",fontSize:11,color:"var(--text3)"}}>
-          Acesso do Gestor — senha: <strong>admin123</strong>
-          <br/>Vendedores usam a senha definida no cadastro.
-        </div>
       </div>
     </div>
   );
