@@ -1085,7 +1085,7 @@ function VendorManagement({ sellers, setSellers }) {
 }
 
 // ─── CAMPAIGNS ─────────────────────────────────────────────────────────────────
-function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
+function Campaigns({ campaigns, setCampaigns, sellers, entries, isAdmin }) {
   const EMPTY = {id:null,name:"",start:"",end:"",prizes:[""],status:""};
   const [form, setForm] = useState(EMPTY);
   const [showForm, setShowForm] = useState(false);
@@ -1135,7 +1135,7 @@ function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
     <div className="page">
       <div className="header">
         <div className="header-title">🏁 Campanhas</div>
-        <button className="btn btn-outline" style={{fontSize:12}} onClick={openCreate}>+ Nova</button>
+        {isAdmin && <button className="btn btn-outline" style={{fontSize:12}} onClick={openCreate}>+ Nova</button>}
       </div>
       <div className="section">
         {campaigns.map(c=>{
@@ -1148,7 +1148,7 @@ function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
                 <div style={{fontSize:16,fontWeight:800,color:isActive?"white":"var(--black)",flex:1,marginRight:8}}>{c.name}</div>
                 <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
                   <span className={`chip ${isActive?"chip-green":"chip-orange"}`}>{isActive?"🔥 Ativa":c.status==="future"?"⏳ Futura":"✅ Encerrada"}</span>
-                  <button className="btn btn-ghost" style={{fontSize:11,padding:"4px 10px",color:isActive?"rgba(255,255,255,0.7)":"var(--text2)",minWidth:0}} onClick={()=>openEdit(c)}>✏️</button>
+                  {isAdmin && <button className="btn btn-ghost" style={{fontSize:11,padding:"4px 10px",color:isActive?"rgba(255,255,255,0.7)":"var(--text2)",minWidth:0}} onClick={()=>openEdit(c)}>✏️</button>}
                 </div>
               </div>
               <div style={{fontSize:11,fontWeight:600,color:isActive?"rgba(255,255,255,0.5)":"var(--text3)",marginBottom:12}}>
@@ -1470,7 +1470,7 @@ export default function App() {
       case "launch": return <LaunchPoints user={user} sellers={sellers} entries={entries} setEntries={setEntries} campaigns={campaigns} showToast={triggerToast} showConfetti={triggerConfetti} pointRules={pointRules} />;
       case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} />;
       case "vendors": return <VendorManagement sellers={sellers} setSellers={setSellers} />;
-      case "campaigns": return <Campaigns campaigns={campaigns} setCampaigns={setCampaigns} sellers={sellers} entries={entries} />;
+      case "campaigns": return <Campaigns campaigns={campaigns} setCampaigns={setCampaigns} sellers={sellers} entries={entries} isAdmin={isAdmin} />;
       default: return null;
     }
   }
