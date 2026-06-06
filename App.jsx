@@ -350,8 +350,9 @@ const DB_KEYS = {
   sellers: "ib:sellers",
   campaigns: "ib:campaigns",
   entries: "ib:entries",
-  snapshots: "ib:snapshots", // daily rank history
+  snapshots: "ib:snapshots",
   meta: "ib:meta",
+  pointRules: "ib:point_rules",
 };
 
 const api = {
@@ -395,10 +396,11 @@ const api = {
         entries: map[DB_KEYS.entries] || [],
         snapshots: map[DB_KEYS.snapshots] || {},
         meta: map[DB_KEYS.meta] || { seeded: false },
+        pointRulesMap: map[DB_KEYS.pointRules] || null,
       };
     } catch (e) {
       console.error("loadAll failed", e);
-      return { sellers: [], campaigns: [], entries: [], snapshots: {}, meta: { seeded: false } };
+      return { sellers: [], campaigns: [], entries: [], snapshots: {}, meta: { seeded: false }, pointRulesMap: null };
     }
   },
 };
@@ -562,7 +564,7 @@ function LoginScreen({ sellers, onLogin }) {
 }
 
 // ─── DASHBOARD (VENDEDOR) ──────────────────────────────────────────────────────
-function Dashboard({ user, sellers, entries, campaigns }) {
+function Dashboard({ user, sellers, entries, campaigns, pointRules }) {
   const activeCampaign = campaigns.find(c=>c.status==="active");
   const ranking = getRanking(sellers, entries, activeCampaign?.id);
   const me = ranking.find(r=>r.id===user.id)||{rank:"-",total:0};
@@ -638,6 +640,20 @@ function Dashboard({ user, sellers, entries, campaigns }) {
             return <div key={e.id} className="history-item"><div className="history-icon">{pt?.icon}</div><div className="history-info"><div className="history-action">{pt?.name}</div><div className="history-meta">{fmtDate(e.date)}</div></div><div className="history-pts">+{e.pts}</div></div>;
           })}
           {entries.filter(e=>e.sellerId===user.id).length===0 && <div className="empty"><div className="empty-icon">📭</div><div>Nenhum ponto ainda</div></div>}
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title">📊 Como Pontuar</div>
+        <div className="card" style={{padding:"4px 0"}}>
+          {pointRules.map((pt,i)=>(
+            <div key={pt.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderBottom:i<pointRules.length-1?"1px solid var(--border)":"none"}}>
+              <span style={{fontSize:20,width:28,textAlign:"center",flexShrink:0}}>{pt.icon}</span>
+              <span style={{flex:1,fontSize:14,fontWeight:600,color:"var(--text)"}}>{pt.name}</span>
+              <span style={{fontFamily:"Barlow Condensed,sans-serif",fontSize:20,fontWeight:900,background:"var(--ib-grad)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>+{pt.pts}</span>
+              <span style={{fontSize:11,fontWeight:600,color:"var(--text3)",marginLeft:2}}>pts</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -783,7 +799,7 @@ function Ranking({ user, sellers, entries, campaigns, snapshots }) {
 
 
 // ─── LAUNCH POINTS ─────────────────────────────────────────────────────────────
-function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast, showConfetti }) {
+function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast, showConfetti, pointRules }) {
   const [selSeller, setSelSeller] = useState("");
   const [selType, setSelType] = useState(null);
   const [note, setNote] = useState("");
@@ -793,7 +809,7 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
   function confirm() {
     if (!selSeller||!selType) return;
     setLoading(true);
-    const pt = POINT_TYPES.find(p=>p.id===selType);
+    const pt = pointRules.find(p=>p.id===selType);
     const seller = sellers.find(s=>s.id===selSeller);
     setTimeout(()=>{
       const entry = { id:uid("e"), sellerId:selSeller, campaignId:activeCampaign?.id||null, type:selType, pts:pt.pts, note, date:new Date().toISOString(), addedBy:user.id };
@@ -823,7 +839,7 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
 
         <div className="label mb-2">Tipo de Ponto</div>
         <div className="point-grid mb-4">
-          {POINT_TYPES.map(pt=>(
+          {pointRules.map(pt=>(
             <div key={pt.id} className={`point-btn ${selType===pt.id?"selected":""}`} onClick={()=>setSelType(pt.id)}>
               <div className="point-btn-icon">{pt.icon}</div>
               <div className="point-btn-name">{pt.name}</div>
@@ -839,7 +855,7 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
           <div className="card mb-3" style={{borderLeft:"4px solid var(--ib-orange)"}}>
             <div className="text-sm fw-700">Confirmar lançamento</div>
             <div className="text-sm text-muted mt-2">
-              {sellers.find(s=>s.id===selSeller)?.name} → {POINT_TYPES.find(p=>p.id===selType)?.name} (+{POINT_TYPES.find(p=>p.id===selType)?.pts} pts)
+              {sellers.find(s=>s.id===selSeller)?.name} → {pointRules.find(p=>p.id===selType)?.name} (+{pointRules.find(p=>p.id===selType)?.pts} pts)
             </div>
           </div>
         )}
@@ -1242,11 +1258,14 @@ export default function App() {
   const [entries, setEntries] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [snapshots, setSnapshots] = useState({});
+  const [pointRules, setPointRules] = useState(POINT_TYPES);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState(null);
   const [showToastFlag, setShowToastFlag] = useState(false);
   const [confetti, setConfetti] = useState(false);
+  const [showPointConfig, setShowPointConfig] = useState(false);
+  const [draftRules, setDraftRules] = useState(POINT_TYPES);
   const toastRef = useRef(null);
   const loadedRef = useRef(false);
   const syncTimer = useRef(null);
@@ -1261,6 +1280,9 @@ export default function App() {
       setCampaigns(data.campaigns || []);
       setEntries(data.entries || []);
       setSnapshots(data.snapshots || {});
+      const storedPts = data.pointRulesMap;
+      const merged = POINT_TYPES.map(p => ({ ...p, pts: storedPts?.[p.id] ?? p.pts }));
+      setPointRules(merged);
       loadedRef.current = true;
       setLoading(false);
       // Restore remembered session
@@ -1291,6 +1313,13 @@ export default function App() {
   useEffect(() => { if (loadedRef.current) { api.save(DB_KEYS.campaigns, campaigns); flashSync(); } }, [campaigns]);
   useEffect(() => { if (loadedRef.current) { api.save(DB_KEYS.entries, entries); flashSync(); } }, [entries]);
   useEffect(() => { if (loadedRef.current) { api.save(DB_KEYS.snapshots, snapshots); } }, [snapshots]);
+  useEffect(() => {
+    if (loadedRef.current) {
+      const map = {};
+      pointRules.forEach(r => { map[r.id] = r.pts; });
+      api.save(DB_KEYS.pointRules, map);
+    }
+  }, [pointRules]);
 
   // ── Record a daily rank snapshot (once per day, on data change) ──
   useEffect(() => {
@@ -1370,7 +1399,10 @@ export default function App() {
             <div className="page">
               <div className="header">
                 <img src={`data:image/jpeg;base64,${LOGO_B64}`} className="header-logo" alt="Logo" />
-                <button className="btn btn-ghost" style={{fontSize:12}} onClick={handleLogout}>Sair</button>
+                <div style={{display:"flex",gap:6}}>
+                  <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setDraftRules([...pointRules]);setShowPointConfig(true);}}>⚙️ Pontos</button>
+                  <button className="btn btn-ghost" style={{fontSize:12}} onClick={handleLogout}>Sair</button>
+                </div>
               </div>
               <div className="section">
                 <div className="score-hero mb-3">
@@ -1433,9 +1465,9 @@ export default function App() {
             </div>
           );
         }
-        return <Dashboard user={user} sellers={sellers} entries={entries} campaigns={campaigns} />;
+        return <Dashboard user={user} sellers={sellers} entries={entries} campaigns={campaigns} pointRules={pointRules} />;
       case "ranking": return <Ranking user={user} sellers={sellers} entries={entries} campaigns={campaigns} snapshots={snapshots} />;
-      case "launch": return <LaunchPoints user={user} sellers={sellers} entries={entries} setEntries={setEntries} campaigns={campaigns} showToast={triggerToast} showConfetti={triggerConfetti} />;
+      case "launch": return <LaunchPoints user={user} sellers={sellers} entries={entries} setEntries={setEntries} campaigns={campaigns} showToast={triggerToast} showConfetti={triggerConfetti} pointRules={pointRules} />;
       case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} />;
       case "vendors": return <VendorManagement sellers={sellers} setSellers={setSellers} />;
       case "campaigns": return <Campaigns campaigns={campaigns} setCampaigns={setCampaigns} sellers={sellers} entries={entries} />;
@@ -1448,6 +1480,27 @@ export default function App() {
       <style>{CSS}</style>
       <Confetti show={confetti} />
       <Toast msg={toast} show={showToastFlag} />
+
+      {showPointConfig && (
+        <div className="modal-bg" style={{zIndex:200}} onClick={e=>e.target===e.currentTarget&&setShowPointConfig(false)}>
+          <div className="modal">
+            <div className="modal-handle" />
+            <div className="title mb-1">⚙️ Sistema de Pontuação</div>
+            <div style={{fontSize:12,color:"var(--text3)",marginBottom:18}}>Defina quantos pontos vale cada tipo de ação</div>
+            {draftRules.map((pt,i)=>(
+              <div key={pt.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                <span style={{fontSize:22,width:28,textAlign:"center",flexShrink:0}}>{pt.icon}</span>
+                <div style={{flex:1,fontSize:14,fontWeight:600,color:"var(--text)",lineHeight:1.2}}>{pt.name}</div>
+                <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>setDraftRules(prev=>prev.map((r,idx)=>idx===i?{...r,pts:Math.max(1,r.pts-1)}:r))}>−</button>
+                <div style={{width:38,textAlign:"center",fontFamily:"Barlow Condensed,sans-serif",fontSize:24,fontWeight:900,color:"var(--ib-orange)",flexShrink:0}}>{pt.pts}</div>
+                <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>setDraftRules(prev=>prev.map((r,idx)=>idx===i?{...r,pts:r.pts+1}:r))}>+</button>
+                <span style={{fontSize:11,fontWeight:600,color:"var(--text3)",width:20,flexShrink:0}}>pts</span>
+              </div>
+            ))}
+            <button className="btn btn-grad mt-2" onClick={()=>{setPointRules(draftRules);setShowPointConfig(false);}}>Salvar</button>
+          </div>
+        </div>
+      )}
       <div className={`sync-dot ${syncing?"show":""}`}><div className="sync-spin" /> salvando</div>
       <div className="app">
         {renderPage()}
