@@ -485,9 +485,32 @@ function ProgressBar({ value, max, height=8 }) {
   return <div className="progress-wrap" style={{height}}><div className="progress-fill" style={{width:`${pct}%`,height:"100%"}} /></div>;
 }
 
+function compressPhoto(file, cb) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 120; canvas.height = 120;
+      const ctx = canvas.getContext("2d");
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, 120, 120);
+      cb(canvas.toDataURL("image/jpeg", 0.75));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 function Avatar({ seller, size=42 }) {
   const colors = ["#FFB800","#FF6B00","#FF2D78","#0071E3","#34C759","#AF52DE"];
   const bg = colors[(seller?.name?.charCodeAt(0)||0) % colors.length];
+  if (seller?.photo) {
+    return <div className="avatar" style={{width:size,height:size,border:`2px solid ${bg}44`,overflow:"hidden",flexShrink:0}}>
+      <img src={seller.photo} alt={seller?.name} style={{width:"100%",height:"100%",objectFit:"cover"}} />
+    </div>;
+  }
   return <div className="avatar" style={{width:size,height:size,background:bg+"22",border:`2px solid ${bg}44`,fontSize:size*0.44}}>{seller?.avatar||"🧑"}</div>;
 }
 
@@ -901,7 +924,11 @@ function Profile({ user, sellers, entries, setEntries, isAdmin }) {
 
       <div className="section">
         <div className="score-hero" style={{textAlign:"center"}}>
-          <div style={{fontSize:56,marginBottom:8}}>{seller.avatar||"🧑"}</div>
+          <div style={{marginBottom:10,display:"flex",justifyContent:"center"}}>
+            {seller.photo
+              ? <div style={{width:72,height:72,borderRadius:"50%",overflow:"hidden",border:"3px solid rgba(255,255,255,0.3)"}}><img src={seller.photo} style={{width:"100%",height:"100%",objectFit:"cover"}} /></div>
+              : <div style={{fontSize:56}}>{seller.avatar||"🧑"}</div>}
+          </div>
           <div style={{fontSize:20,fontWeight:800,color:"white"}}>{seller.name}</div>
           <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:16}}>Vendedor · iPhone Barato</div>
           <div className="score-num score-grad" style={{fontSize:64,lineHeight:1}}>{rank.total}</div>
@@ -971,12 +998,20 @@ function Profile({ user, sellers, entries, setEntries, isAdmin }) {
 // ─── VENDORS ───────────────────────────────────────────────────────────────────
 function VendorManagement({ sellers, setSellers }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({name:"",password:"",avatar:"🧑"});
+  const [editPhotoId, setEditPhotoId] = useState(null);
+  const [form, setForm] = useState({name:"",password:"",avatar:"🧑",photo:""});
+  const photoInputRef = useRef(null);
+  const editPhotoInputRef = useRef(null);
 
   function saveSeller() {
     if (!form.name||!form.password) return;
-    setSellers(prev=>[...prev,{id:uid("s"),name:form.name,avatar:form.avatar,active:true,role:"seller",password:form.password}]);
-    setForm({name:"",password:"",avatar:"🧑"}); setShowForm(false);
+    setSellers(prev=>[...prev,{id:uid("s"),name:form.name,avatar:form.avatar,photo:form.photo,active:true,role:"seller",password:form.password}]);
+    setForm({name:"",password:"",avatar:"🧑",photo:""}); setShowForm(false);
+  }
+
+  function handlePhotoFile(file, cb) {
+    if (!file) return;
+    compressPhoto(file, cb);
   }
 
   return (
@@ -988,7 +1023,10 @@ function VendorManagement({ sellers, setSellers }) {
       <div className="section">
         {sellers.map(s=>(
           <div key={s.id} className="rank-item">
-            <Avatar seller={s} size={42} />
+            <div style={{position:"relative",cursor:"pointer"}} onClick={()=>{setEditPhotoId(s.id);setTimeout(()=>editPhotoInputRef.current?.click(),50);}}>
+              <Avatar seller={s} size={42} />
+              <div style={{position:"absolute",bottom:-2,right:-2,width:16,height:16,borderRadius:"50%",background:"var(--ib-orange)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"white",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,0.3)"}}>📷</div>
+            </div>
             <div className="rank-info">
               <div className="rank-name">{s.name}</div>
               <div style={{fontSize:11,fontWeight:600,color:s.active?"var(--green)":"var(--red)",marginTop:2}}>{s.active?"● Ativo":"● Inativo"}</div>
@@ -1000,19 +1038,56 @@ function VendorManagement({ sellers, setSellers }) {
         ))}
       </div>
 
+      {/* hidden input for editing existing seller photo */}
+      <input ref={editPhotoInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+        const file = e.target.files?.[0];
+        if (!file || !editPhotoId) return;
+        handlePhotoFile(file, photo => {
+          setSellers(prev=>prev.map(s=>s.id===editPhotoId?{...s,photo}:s));
+          setEditPhotoId(null);
+        });
+        e.target.value="";
+      }} />
+
       {showForm && (
-        <div className="modal-bg" onClick={e=>e.target===e.currentTarget&&setShowForm(false)}>
+        <div className="modal-bg" onClick={e=>e.target===e.currentTarget&&(setShowForm(false),setForm({name:"",password:"",avatar:"🧑",photo:""}))}>
           <div className="modal">
             <div className="modal-handle" />
             <div className="title mb-3">Novo Vendedor</div>
-            <div className="label mb-2">Avatar</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
-              {AVATARS.map(av=>(
-                <div key={av} onClick={()=>setForm(f=>({...f,avatar:av}))} style={{width:42,height:42,borderRadius:12,background:form.avatar===av?"rgba(255,107,0,0.12)":"var(--bg2)",border:form.avatar===av?"2px solid var(--ib-orange)":"2px solid transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,cursor:"pointer"}}>
-                  {av}
-                </div>
-              ))}
+
+            {/* Photo upload */}
+            <div className="label mb-2">Foto</div>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+              <div style={{width:64,height:64,borderRadius:"50%",overflow:"hidden",background:"var(--bg2)",border:"2px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                {form.photo
+                  ? <img src={form.photo} style={{width:"100%",height:"100%",objectFit:"cover"}} />
+                  : <span style={{fontSize:28}}>{form.avatar}</span>}
+              </div>
+              <div style={{flex:1}}>
+                <button className="btn btn-outline" style={{fontSize:12,width:"100%",marginBottom:6}} onClick={()=>photoInputRef.current?.click()}>
+                  📷 {form.photo ? "Trocar foto" : "Adicionar foto"}
+                </button>
+                {form.photo && <button className="btn btn-ghost" style={{fontSize:11,width:"100%",color:"var(--red)"}} onClick={()=>setForm(f=>({...f,photo:""}))}>Remover foto</button>}
+              </div>
+              <input ref={photoInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+                const file=e.target.files?.[0];
+                if (file) handlePhotoFile(file, photo=>setForm(f=>({...f,photo})));
+                e.target.value="";
+              }} />
             </div>
+
+            {/* Emoji (used as fallback when no photo) */}
+            {!form.photo && <>
+              <div className="label mb-2">Emoji (opcional)</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+                {AVATARS.map(av=>(
+                  <div key={av} onClick={()=>setForm(f=>({...f,avatar:av}))} style={{width:42,height:42,borderRadius:12,background:form.avatar===av?"rgba(255,107,0,0.12)":"var(--bg2)",border:form.avatar===av?"2px solid var(--ib-orange)":"2px solid transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,cursor:"pointer"}}>
+                    {av}
+                  </div>
+                ))}
+              </div>
+            </>}
+
             <div className="label mb-2">Nome Completo</div>
             <input className="input mb-3" placeholder="Nome do vendedor" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} />
             <div className="label mb-2">Senha</div>
