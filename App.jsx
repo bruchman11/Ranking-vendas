@@ -526,13 +526,14 @@ function LoginScreen({ sellers, onLogin }) {
   const [sel, setSel] = useState("");
   const [pass, setPass] = useState("");
   const [err, setErr] = useState("");
+  const [remember, setRemember] = useState(true);
 
   function doLogin() {
-    if (sel === "admin") { if (pass === "admin123") { onLogin({ id:"admin", name:"Gestor", role:"admin" }); return; } setErr("Senha incorreta"); return; }
+    if (sel === "admin") { if (pass === "admin123") { onLogin({ id:"admin", name:"Gestor", role:"admin" }, remember); return; } setErr("Senha incorreta"); return; }
     const s = sellers.find(x => x.id === sel);
     if (!s) { setErr("Selecione um usuário"); return; }
     if (pass !== s.password) { setErr("Senha incorreta"); return; }
-    onLogin(s);
+    onLogin(s, remember);
   }
 
   return (
@@ -550,6 +551,10 @@ function LoginScreen({ sellers, onLogin }) {
         <div className="label mb-2">Senha</div>
         <input className="input mb-3" type="password" placeholder="Digite sua senha" value={pass} onChange={e=>{setPass(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&doLogin()} />
         {err && <div className="text-sm mb-3" style={{textAlign:"center",color:"var(--red)",fontWeight:600}}>{err}</div>}
+        <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,cursor:"pointer"}}>
+          <input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)} style={{width:16,height:16,accentColor:"var(--ib-orange)",cursor:"pointer",flexShrink:0}} />
+          <span style={{fontSize:13,fontWeight:600,color:"var(--text2)"}}>Lembrar acesso neste dispositivo</span>
+        </label>
         <button className="btn btn-primary" onClick={doLogin}>Entrar →</button>
         <div style={{marginTop:16,textAlign:"center",fontSize:11,color:"var(--text3)"}}>
           Acesso do Gestor — senha: <strong>admin123</strong>
@@ -1262,6 +1267,20 @@ export default function App() {
       setSnapshots(data.snapshots || {});
       loadedRef.current = true;
       setLoading(false);
+      // Restore remembered session
+      try {
+        const saved = localStorage.getItem("ib_session");
+        if (saved) {
+          const { userId } = JSON.parse(saved);
+          if (userId === "admin") {
+            setUser({ id:"admin", name:"Gestor", role:"admin" });
+          } else {
+            const seller = (data.sellers || []).find(s => s.id === userId && s.active);
+            if (seller) setUser(seller);
+            else localStorage.removeItem("ib_session");
+          }
+        }
+      } catch { localStorage.removeItem("ib_session"); }
     })();
     return () => { alive = false; };
   }, []);
@@ -1332,7 +1351,18 @@ export default function App() {
     </>
   );
 
-  if (!user) return (<><style>{CSS}</style><LoginScreen sellers={sellers} onLogin={u=>{setUser(u);setTab("home");}} /></>);
+  function handleLogin(u, remember) {
+    setUser(u);
+    setTab("home");
+    if (remember) localStorage.setItem("ib_session", JSON.stringify({ userId: u.id }));
+    else localStorage.removeItem("ib_session");
+  }
+  function handleLogout() {
+    localStorage.removeItem("ib_session");
+    setUser(null);
+  }
+
+  if (!user) return (<><style>{CSS}</style><LoginScreen sellers={sellers} onLogin={handleLogin} /></>);
 
   function renderPage() {
     switch(tab) {
@@ -1344,7 +1374,7 @@ export default function App() {
             <div className="page">
               <div className="header">
                 <img src={`data:image/jpeg;base64,${LOGO_B64}`} className="header-logo" alt="Logo" />
-                <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>setUser(null)}>Sair</button>
+                <button className="btn btn-ghost" style={{fontSize:12}} onClick={handleLogout}>Sair</button>
               </div>
               <div className="section">
                 <div className="score-hero mb-3">
@@ -1442,7 +1472,7 @@ export default function App() {
             );
           })}
           {!isAdmin && (
-            <div className="nav-item" onClick={()=>setUser(null)}>
+            <div className="nav-item" onClick={handleLogout}>
               <Icon name="logout" /><span>Sair</span>
             </div>
           )}
