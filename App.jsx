@@ -776,39 +776,6 @@ function Ranking({ user, sellers, entries, campaigns, snapshots }) {
         ))}
       </div>
 
-      {/* Sticky "you" summary card — only for sellers not in podium-only view */}
-      {isSeller && me && (
-        <div className="my-summary">
-          <div className="my-card">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <div style={{fontFamily:"Barlow Condensed,sans-serif",fontSize:34,fontWeight:900,color:"white",lineHeight:1}}>#{me.rank}</div>
-                <div>
-                  <div style={{fontSize:13,fontWeight:700,color:"white"}}>Sua posição</div>
-                  <div style={{fontSize:12,color:"rgba(255,255,255,0.8)"}}>{me.total} pontos</div>
-                </div>
-              </div>
-              <MovementBadge prevRank={myPrev} currentRank={me.rank} />
-            </div>
-            <div className="my-msg">
-              {above
-                ? `Faltam ${ptsToNext} pts para passar ${above.name.split(" ")[0]}${ptsToTop3>0 ? ` e ${ptsToTop3} pts para entrar no Top 3.` : "."}`
-                : "👑 Você está no topo do ranking!"}
-            </div>
-            <div style={{marginTop:8,fontSize:12,fontWeight:700,color:"white",textAlign:"center"}}>{myMessage()}</div>
-            {(() => {
-              const h = rankHistory(snapshots, me.id);
-              if (!h.best && !h.top3Streak) return null;
-              return (
-                <div style={{marginTop:10,display:"flex",gap:8,justifyContent:"center"}}>
-                  {h.best && <span className="chip" style={{background:"rgba(0,0,0,0.2)",color:"white"}}>🏆 Melhor: #{h.best}</span>}
-                  {h.top3Streak > 0 && <span className="chip" style={{background:"rgba(0,0,0,0.2)",color:"white"}}>🔥 {h.top3Streak}d no Top 3</span>}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
