@@ -1069,24 +1069,56 @@ function VendorManagement({ sellers, setSellers }) {
 
 // ─── CAMPAIGNS ─────────────────────────────────────────────────────────────────
 function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
+  const EMPTY = {id:null,name:"",start:"",end:"",prizes:[""],status:""};
+  const [form, setForm] = useState(EMPTY);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({name:"",start:"",end:"",prizes:["","",""]});
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  function autoStatus(start, end) {
+    const now=new Date(), s=new Date(start), e=new Date(end);
+    if (now>=s && now<=e) return "active";
+    if (now>e) return "finished";
+    return "future";
+  }
+
+  function openCreate() {
+    setForm({...EMPTY, prizes:["","",""]});
+    setConfirmDel(false);
+    setShowForm(true);
+  }
+
+  function openEdit(c) {
+    setForm({id:c.id, name:c.name, start:c.start, end:c.end, prizes:c.prizes.length?[...c.prizes]:[""], status:c.status});
+    setConfirmDel(false);
+    setShowForm(true);
+  }
+
+  function closeForm() { setShowForm(false); setConfirmDel(false); }
 
   function saveForm() {
     if (!form.name||!form.start||!form.end) return;
-    const now=new Date(), start=new Date(form.start), end=new Date(form.end);
-    let status = "future";
-    if (now>=start && now<=end) status = "active";
-    if (now>end) status = "finished";
-    setCampaigns(prev=>[...prev,{id:uid("c"),name:form.name,start:form.start,end:form.end,status,prizes:form.prizes.filter(Boolean),rules:POINT_TYPES}]);
-    setForm({name:"",start:"",end:"",prizes:["","",""]}); setShowForm(false);
+    const prizes = form.prizes.filter(Boolean);
+    const status = form.status || autoStatus(form.start, form.end);
+    if (form.id) {
+      setCampaigns(prev=>prev.map(c=>c.id===form.id?{...c,name:form.name,start:form.start,end:form.end,prizes,status}:c));
+    } else {
+      setCampaigns(prev=>[...prev,{id:uid("c"),name:form.name,start:form.start,end:form.end,status,prizes,rules:POINT_TYPES}]);
+    }
+    closeForm();
   }
+
+  function deleteCampaign() {
+    setCampaigns(prev=>prev.filter(c=>c.id!==form.id));
+    closeForm();
+  }
+
+  const MEDALS = ["🥇","🥈","🥉"];
 
   return (
     <div className="page">
       <div className="header">
         <div className="header-title">🏁 Campanhas</div>
-        <button className="btn btn-outline" style={{fontSize:12}} onClick={()=>setShowForm(true)}>+ Nova</button>
+        <button className="btn btn-outline" style={{fontSize:12}} onClick={openCreate}>+ Nova</button>
       </div>
       <div className="section">
         {campaigns.map(c=>{
@@ -1096,8 +1128,11 @@ function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
           return (
             <div key={c.id} className={`campaign-card campaign-${c.status}`}>
               <div className="flex justify-between items-center mb-2">
-                <div style={{fontSize:16,fontWeight:800,color:isActive?"white":"var(--black)"}}>{c.name}</div>
-                <span className={`chip ${isActive?"chip-green":"chip-orange"}`}>{isActive?"🔥 Ativa":c.status==="future"?"⏳ Futura":"✅ Encerrada"}</span>
+                <div style={{fontSize:16,fontWeight:800,color:isActive?"white":"var(--black)",flex:1,marginRight:8}}>{c.name}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                  <span className={`chip ${isActive?"chip-green":"chip-orange"}`}>{isActive?"🔥 Ativa":c.status==="future"?"⏳ Futura":"✅ Encerrada"}</span>
+                  <button className="btn btn-ghost" style={{fontSize:11,padding:"4px 10px",color:isActive?"rgba(255,255,255,0.7)":"var(--text2)",minWidth:0}} onClick={()=>openEdit(c)}>✏️</button>
+                </div>
               </div>
               <div style={{fontSize:11,fontWeight:600,color:isActive?"rgba(255,255,255,0.5)":"var(--text3)",marginBottom:12}}>
                 {new Date(c.start).toLocaleDateString("pt-BR")} → {new Date(c.end).toLocaleDateString("pt-BR")}
@@ -1106,7 +1141,7 @@ function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
                 <div className="mb-3">
                   {c.prizes.map((p,i)=>(
                     <div key={i} style={{fontSize:13,fontWeight:600,color:isActive?"rgba(255,255,255,0.8)":"var(--text2)",marginBottom:3}}>
-                      {["🥇","🥈","🥉"][i]} {p}
+                      {MEDALS[i]||"🏅"} {p}
                     </div>
                   ))}
                 </div>
@@ -1116,7 +1151,7 @@ function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
                   <div style={{fontSize:10,fontWeight:700,color:isActive?"rgba(255,255,255,0.4)":"var(--text3)",textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:8}}>Top 3 Atual</div>
                   {ranking.slice(0,3).map((s,i)=>(
                     <div key={s.id} className="flex items-center gap-2 mb-1">
-                      <span style={{fontSize:14}}>{["🥇","🥈","🥉"][i]}</span>
+                      <span style={{fontSize:14}}>{MEDALS[i]}</span>
                       <span style={{fontSize:13,fontWeight:600,color:isActive?"white":"var(--text)",flex:1}}>{s.name}</span>
                       <span style={{fontFamily:"Barlow Condensed, sans-serif",fontSize:16,fontWeight:800,background:"var(--ib-grad)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>{s.total} pts</span>
                     </div>
@@ -1129,19 +1164,54 @@ function Campaigns({ campaigns, setCampaigns, sellers, entries }) {
       </div>
 
       {showForm && (
-        <div className="modal-bg" onClick={e=>e.target===e.currentTarget&&setShowForm(false)}>
+        <div className="modal-bg" onClick={e=>e.target===e.currentTarget&&closeForm()}>
           <div className="modal">
             <div className="modal-handle" />
-            <div className="title mb-3">Nova Campanha</div>
+            <div className="title mb-3">{form.id?"Editar Campanha":"Nova Campanha"}</div>
+
             <div className="label mb-2">Nome</div>
             <input className="input mb-3" placeholder="Ex: Campanha Julho" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} />
+
             <div className="flex gap-2 mb-3">
               <div style={{flex:1}}><div className="label mb-2">Início</div><input className="input" type="date" value={form.start} onChange={e=>setForm(f=>({...f,start:e.target.value}))} /></div>
               <div style={{flex:1}}><div className="label mb-2">Fim</div><input className="input" type="date" value={form.end} onChange={e=>setForm(f=>({...f,end:e.target.value}))} /></div>
             </div>
+
+            <div className="label mb-2">Status</div>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {[["future","⏳ Futura"],["active","🔥 Ativa"],["finished","✅ Encerrada"]].map(([v,l])=>(
+                <button key={v} className={`btn ${form.status===v?"btn-grad":"btn-outline"}`} style={{flex:1,fontSize:11,padding:"8px 2px"}} onClick={()=>setForm(f=>({...f,status:v}))}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
             <div className="label mb-2">Premiação</div>
-            {[0,1,2].map(i=><input key={i} className="input mb-2" placeholder={`${["🥇","🥈","🥉"][i]} Prêmio...`} value={form.prizes[i]} onChange={e=>setForm(f=>{const p=[...f.prizes];p[i]=e.target.value;return{...f,prizes:p};})} />)}
-            <button className="btn btn-grad mt-3" onClick={saveForm}>Criar Campanha</button>
+            {form.prizes.map((p,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <span style={{fontSize:18,width:24,textAlign:"center",flexShrink:0}}>{MEDALS[i]||"🏅"}</span>
+                <input className="input" placeholder={`${i+1}º Prêmio...`} value={p} onChange={e=>setForm(f=>{const pz=[...f.prizes];pz[i]=e.target.value;return{...f,prizes:pz};})} style={{flex:1}} />
+                {form.prizes.length>1 && (
+                  <button className="btn btn-ghost" style={{padding:"0 10px",fontSize:18,color:"var(--red)",flexShrink:0}} onClick={()=>setForm(f=>({...f,prizes:f.prizes.filter((_,idx)=>idx!==i)}))}>×</button>
+                )}
+              </div>
+            ))}
+            <button className="btn btn-ghost" style={{fontSize:12,width:"100%",marginBottom:16}} onClick={()=>setForm(f=>({...f,prizes:[...f.prizes,""]}))}>+ Adicionar prêmio</button>
+
+            <button className="btn btn-grad" style={{marginBottom:8}} onClick={saveForm}>{form.id?"Salvar Alterações":"Criar Campanha"}</button>
+
+            {form.id && !confirmDel && (
+              <button className="btn btn-ghost" style={{width:"100%",color:"var(--red)",fontSize:12}} onClick={()=>setConfirmDel(true)}>Excluir campanha</button>
+            )}
+            {form.id && confirmDel && (
+              <div style={{background:"rgba(255,45,72,0.08)",borderRadius:12,padding:12,textAlign:"center",marginTop:4}}>
+                <div style={{fontSize:13,fontWeight:600,color:"var(--red)",marginBottom:10}}>Excluir permanentemente?</div>
+                <div style={{display:"flex",gap:8}}>
+                  <button className="btn btn-ghost" style={{flex:1,fontSize:12}} onClick={()=>setConfirmDel(false)}>Cancelar</button>
+                  <button className="btn btn-danger" style={{flex:1,fontSize:12}} onClick={deleteCampaign}>Excluir</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
