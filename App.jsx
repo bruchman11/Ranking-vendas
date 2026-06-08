@@ -301,6 +301,28 @@ const CSS = `
   @keyframes slideRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   .rk-row { animation: slideRise 0.3s ease backwards; }
 
+  /* ranking details (expandable) */
+  .rk-item { margin-bottom: 6px; }
+  .rk-item .rk-row { margin-bottom: 0; }
+  .rk-item.open .rk-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .rk-toggle { background: transparent; border: none; cursor: pointer; padding: 6px 4px; margin-left: 4px; color: var(--text3); font-size: 14px; line-height: 1; transition: transform 0.2s, color 0.2s; }
+  .rk-toggle.open { transform: rotate(180deg); color: var(--ib-orange); }
+  .rk-row.me .rk-toggle { color: rgba(255,255,255,0.55); }
+  .rk-row.me .rk-toggle.open { color: white; }
+  .rk-details { background: var(--surface); border-top: 1px solid var(--border); border-radius: 0 0 16px 16px; padding: 8px 14px 12px; box-shadow: var(--shadow); animation: slideRise 0.2s ease backwards; }
+  .rk-item.me .rk-details { background: var(--black); color: white; border-top-color: rgba(255,255,255,0.08); }
+  .rk-item.me .rk-det-row { color: rgba(255,255,255,0.85); }
+  .rk-item.me .rk-det-row + .rk-det-row { border-top-color: rgba(255,255,255,0.08); }
+  .rk-det-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-size: 13px; }
+  .rk-det-row + .rk-det-row { border-top: 1px dashed var(--border); }
+  .rk-det-icon { font-size: 16px; width: 22px; text-align: center; }
+  .rk-det-name { flex: 1; font-weight: 600; }
+  .rk-det-val { font-weight: 700; color: var(--text2); }
+  .rk-item.me .rk-det-val { color: rgba(255,255,255,0.65); }
+  .rk-det-pts { color: var(--ib-orange); font-weight: 800; margin-left: 8px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; }
+  .rk-det-row.zero { opacity: 0.45; }
+  .rk-det-empty { text-align: center; padding: 12px 8px; font-size: 12px; color: var(--text3); }
+
   /* ── LOADING / SYNC ── */
   .loading-bg { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg); gap: 20px; }
   .loading-logo { width: 88px; height: 88px; object-fit: contain; animation: logoPulse 1.4s ease-in-out infinite; }
@@ -443,6 +465,18 @@ function buildRanking(sellers, filtered) {
   });
   rows.sort((a, b) => b.total - a.total || b.organic - a.organic || a.lastTs - b.lastTs);
   return rows.map((s, i) => ({ ...s, rank: i + 1 }));
+}
+
+// Breakdown por tipo respeitando período/campanha (ignora filtro de type)
+function buildBreakdown(entries, sid, { period, campaignId }) {
+  const list = filterEntries(entries, { period, type: "all", campaignId });
+  const mine = list.filter(e => e.sellerId === sid);
+  const map = {};
+  mine.forEach(e => {
+    const cur = map[e.type] || { count: 0, pts: 0 };
+    map[e.type] = { count: cur.count + 1, pts: cur.pts + e.pts };
+  });
+  return map;
 }
 
 // snapshots shape: { "YYYY-MM-DD": { sellerId: rank, ... }, ... }
@@ -669,9 +703,11 @@ function MovementBadge({ prevRank, currentRank }) {
   return <span className="mv mv-same">–</span>;
 }
 
-function Ranking({ user, sellers, entries, campaigns, snapshots }) {
+function Ranking({ user, sellers, entries, campaigns, snapshots, pointRules }) {
   const [period, setPeriod] = useState("campaign");
   const [type, setType] = useState("all");
+  const [expandedId, setExpandedId] = useState(null);
+  const metrics = (pointRules && pointRules.length) ? pointRules : POINT_TYPES;
   const activeCampaign = campaigns.find(c => c.status === "active");
   const isSeller = user.role !== "admin";
 
@@ -773,24 +809,56 @@ function Ranking({ user, sellers, entries, campaigns, snapshots }) {
       {/* Full list */}
       <div className="section">
         <div className="section-title">Classificação Geral</div>
-        {ranking.map((s, idx) => (
-          <div key={s.id} className={`rk-row ${s.id===user.id?"me":""}`} style={{animationDelay:`${idx*40}ms`}}>
-            <div className="rk-pos">{s.rank}</div>
-            <Avatar seller={s} size={40} />
-            <div style={{flex:1}}>
-              <div className="rk-name">
-                {s.name} {s.id===user.id && <span className="chip chip-orange" style={{fontSize:9,padding:"2px 6px"}}>você</span>}
+        {ranking.map((s, idx) => {
+          const isOpen = expandedId === s.id;
+          const isMe = s.id === user.id;
+          const breakdown = isOpen ? buildBreakdown(entries, s.id, { period, campaignId: activeCampaign?.id }) : null;
+          const totalCount = breakdown ? Object.values(breakdown).reduce((a,b)=>a+b.count,0) : 0;
+          return (
+            <div key={s.id} className={`rk-item ${isOpen?"open":""} ${isMe?"me":""}`} style={{animationDelay:`${idx*40}ms`}}>
+              <div className={`rk-row ${isMe?"me":""}`}>
+                <div className="rk-pos">{s.rank}</div>
+                <Avatar seller={s} size={40} />
+                <div style={{flex:1}}>
+                  <div className="rk-name">
+                    {s.name} {isMe && <span className="chip chip-orange" style={{fontSize:9,padding:"2px 6px"}}>você</span>}
+                  </div>
+                  <div className="rk-sub">
+                    <span>{s.total} pts</span>
+                    <span>·</span>
+                    <MovementBadge prevRank={movement[s.id]} currentRank={s.rank} />
+                    {s.organic > 0 && <span style={{color:"var(--text3)"}}>· 🤝 {s.organic}</span>}
+                  </div>
+                </div>
+                <div className="rk-score-v">{s.total}</div>
+                <button
+                  className={`rk-toggle ${isOpen?"open":""}`}
+                  onClick={()=>setExpandedId(prev => prev===s.id ? null : s.id)}
+                  aria-expanded={isOpen}
+                  aria-label={isOpen?"Ocultar detalhes":"Ver detalhes"}
+                >▾</button>
               </div>
-              <div className="rk-sub">
-                <span>{s.total} pts</span>
-                <span>·</span>
-                <MovementBadge prevRank={movement[s.id]} currentRank={s.rank} />
-                {s.organic > 0 && <span style={{color:"var(--text3)"}}>· 🤝 {s.organic}</span>}
-              </div>
+              {isOpen && (
+                <div className="rk-details">
+                  {totalCount === 0 ? (
+                    <div className="rk-det-empty">Sem lançamentos neste período</div>
+                  ) : metrics.map(pt => {
+                    const b = breakdown[pt.id] || { count: 0, pts: 0 };
+                    const unit = b.count === 1 ? "lançamento" : "lançamentos";
+                    return (
+                      <div key={pt.id} className={`rk-det-row ${b.count===0?"zero":""}`}>
+                        <div className="rk-det-icon">{pt.icon}</div>
+                        <div className="rk-det-name">{pt.name}</div>
+                        <div className="rk-det-val">{b.count} {unit}</div>
+                        <div className="rk-det-pts">{b.pts} pts</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            <div className="rk-score-v">{s.total}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
     </div>
@@ -1466,7 +1534,7 @@ export default function App() {
           );
         }
         return <Dashboard user={user} sellers={sellers} entries={entries} campaigns={campaigns} pointRules={pointRules} />;
-      case "ranking": return <Ranking user={user} sellers={sellers} entries={entries} campaigns={campaigns} snapshots={snapshots} />;
+      case "ranking": return <Ranking user={user} sellers={sellers} entries={entries} campaigns={campaigns} snapshots={snapshots} pointRules={pointRules} />;
       case "launch": return <LaunchPoints user={user} sellers={sellers} entries={entries} setEntries={setEntries} campaigns={campaigns} showToast={triggerToast} showConfetti={triggerConfetti} pointRules={pointRules} />;
       case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} />;
       case "vendors": return <VendorManagement sellers={sellers} setSellers={setSellers} />;
