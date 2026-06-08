@@ -338,6 +338,22 @@ const CSS = `
   .mode-tab { background: var(--bg2); border: 1px solid var(--border); color: var(--text2); padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
   .mode-tab.active { background: var(--ib-grad); color: white; border-color: transparent; }
 
+  /* rule editor cards in point config modal */
+  .rule-card { background: var(--bg); border-radius: 12px; padding: 12px; margin-bottom: 10px; border: 1px solid var(--border); }
+  .rule-card.invalid { border-color: #d33; }
+  .rule-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .rule-icon-input { width: 48px; text-align: center; font-size: 18px; padding: 6px 4px; flex-shrink: 0; }
+  .rule-name-input { flex: 1; padding: 6px 10px; font-size: 14px; font-weight: 600; min-width: 0; }
+  .rule-id { font-size: 10px; color: var(--text3); margin-top: 8px; font-family: monospace; opacity: 0.6; }
+  .rule-archive-btn { background: transparent; border: none; cursor: pointer; padding: 6px; font-size: 14px; color: var(--text3); border-radius: 6px; flex-shrink: 0; }
+  .rule-archive-btn:hover { color: var(--ib-orange); background: var(--bg2); }
+  .chip-achievement { font-size: 11px; padding: 3px 7px; border-radius: 4px; background: rgba(255,107,0,0.12); color: var(--ib-orange); font-weight: 700; flex-shrink: 0; }
+  .add-rule-btn { background: transparent; border: 1.5px dashed var(--border); color: var(--text2); padding: 12px; border-radius: 12px; width: 100%; cursor: pointer; font-weight: 700; font-size: 13px; transition: all 0.15s; }
+  .add-rule-btn:hover { border-color: var(--ib-orange); color: var(--ib-orange); }
+  .archived-section { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .archived-toggle { background: transparent; border: none; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--text2); padding: 4px 0; width: 100%; text-align: left; }
+  .archived-rule { display: flex; align-items: center; gap: 10px; padding: 8px 0; opacity: 0.7; }
+
   /* ── LOADING / SYNC ── */
   .loading-bg { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg); gap: 20px; }
   .loading-logo { width: 88px; height: 88px; object-fit: contain; animation: logoPulse 1.4s ease-in-out infinite; }
@@ -354,13 +370,42 @@ const CSS = `
 
 // ─── DATA ──────────────────────────────────────────────────────────────────────
 const POINT_TYPES = [
-  { id: "online", name: "Venda Online", icon: "🛒", pts: 1, mode: "unit" },
-  { id: "organic", name: "Venda Orgânica", icon: "🤝", pts: 3, mode: "unit" },
-  { id: "google", name: "Avaliação Google", icon: "⭐", pts: 1, mode: "unit" },
-  { id: "video", name: "Depoimento Vídeo", icon: "🎬", pts: 2, mode: "unit" },
-  { id: "accessories", name: "Acessórios", icon: "🎒", pts: 5, mode: "accum", threshold: 5000, unit: "R$" },
-  { id: "tiktok", name: "Venda TikTok", icon: "🎵", pts: 10, mode: "unit" },
+  { id: "online", name: "Venda Online", icon: "🛒", pts: 1, mode: "unit", builtin: true },
+  { id: "organic", name: "Venda Orgânica", icon: "🤝", pts: 3, mode: "unit", builtin: true },
+  { id: "google", name: "Avaliação Google", icon: "⭐", pts: 1, mode: "unit", builtin: true },
+  { id: "video", name: "Depoimento Vídeo", icon: "🎬", pts: 2, mode: "unit", builtin: true },
+  { id: "accessories", name: "Acessórios", icon: "🎒", pts: 5, mode: "accum", threshold: 5000, unit: "R$", builtin: true },
+  { id: "tiktok", name: "Venda TikTok", icon: "🎵", pts: 10, mode: "unit", builtin: true },
 ];
+
+const ACHIEVEMENT_PROTECTED_IDS = ["online","organic","google","video","accessories","tiktok"];
+
+function normalizePointRules(raw) {
+  let list;
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (raw && typeof raw === "object") {
+    list = Object.entries(raw).map(([id, v]) => {
+      const base = POINT_TYPES.find(p => p.id === id);
+      const parsed = (typeof v === "number") ? { pts: v } : (v || {});
+      return { ...(base || {}), id, ...parsed };
+    });
+  } else {
+    list = [];
+  }
+  POINT_TYPES.forEach(bi => {
+    if (!list.find(r => r.id === bi.id)) list.push({ ...bi });
+  });
+  return list.map(r => {
+    const builtin = POINT_TYPES.find(p => p.id === r.id);
+    const out = { ...(builtin || {}), ...r, builtin: !!builtin };
+    if (out.id === "accessories" && out.mode !== "accum") {
+      out.mode = "accum"; out.threshold = 5000; out.unit = "R$";
+    }
+    if (!out.mode) out.mode = "unit";
+    return out;
+  });
+}
 
 const ACHIEVEMENTS_DEF = [
   { id: "first_online", name: "Primeira Venda Online", icon: "🛒", desc: "Realize sua 1ª venda online", condition: (s) => s.online >= 1 },
@@ -450,7 +495,7 @@ const weekPts = (entries, sid) => { const wa = new Date(Date.now() - 7*864e5); r
 const monthPts = (entries, sid) => { const n = new Date(); return entries.filter(e => { const d=new Date(e.date); return e.sellerId===sid && d.getMonth()===n.getMonth(); }).reduce((a,e)=>a+e.pts,0); };
 const getRanking = (sellers, entries, cid) => sellers.filter(s=>s.active).map(s=>({...s, total: totalPts(entries, s.id, cid)})).sort((a,b)=>b.total-a.total).map((s,i)=>({...s, rank:i+1}));
 const fmtDate = iso => new Date(iso).toLocaleDateString("pt-BR", {day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit"});
-const buildStats = (entries, sid) => { const c = {}; POINT_TYPES.forEach(p=>c[p.id]=0); entries.filter(e=>e.sellerId===sid).forEach(e=>{c[e.type]=(c[e.type]||0)+1;}); return c; };
+const buildStats = (entries, sid, rules = POINT_TYPES) => { const c = {}; POINT_TYPES.forEach(p=>c[p.id]=0); rules.forEach(p=>{ if (c[p.id]==null) c[p.id]=0; }); entries.filter(e=>e.sellerId===sid).forEach(e=>{c[e.type]=(c[e.type]||0)+1;}); return c; };
 const getChartData = (entries, sid) => Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); const lbl=d.toLocaleDateString("pt-BR",{weekday:"short"}).slice(0,3); const pts=entries.filter(e=>{const ed=new Date(e.date); return e.sellerId===sid && ed.toDateString()===d.toDateString();}).reduce((a,e)=>a+e.pts,0); return {lbl,pts}; });
 const checkAchievements = (entries, sid) => { const stats=buildStats(entries,sid); return ACHIEVEMENTS_DEF.map(a=>({...a, unlocked:a.condition(stats)})); };
 
@@ -746,7 +791,7 @@ function Ranking({ user, sellers, entries, campaigns, snapshots, pointRules }) {
   const [period, setPeriod] = useState("campaign");
   const [type, setType] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
-  const metrics = (pointRules && pointRules.length) ? pointRules : POINT_TYPES;
+  const metrics = ((pointRules && pointRules.length) ? pointRules : POINT_TYPES).filter(p=>!p.archived);
   const activeCampaign = campaigns.find(c => c.status === "active");
   const isSeller = user.role !== "admin";
 
@@ -801,7 +846,7 @@ function Ranking({ user, sellers, entries, campaigns, snapshots, pointRules }) {
       {/* Type filter chips */}
       <div className="rk-types">
         <div className={`rk-type-chip ${type==="all"?"active":""}`} onClick={()=>setType("all")}>🏆 Tudo</div>
-        {POINT_TYPES.map(pt => (
+        {(pointRules||POINT_TYPES).filter(p=>!p.archived).map(pt => (
           <div key={pt.id} className={`rk-type-chip ${type===pt.id?"active":""}`} onClick={()=>setType(pt.id)}>
             {pt.icon} {pt.name.replace("Venda ","").replace("Avaliação ","")}
           </div>
@@ -812,7 +857,7 @@ function Ranking({ user, sellers, entries, campaigns, snapshots, pointRules }) {
       {ranking.length >= 1 && (
         <div className="section">
           <div className="score-hero">
-            <div className="label" style={{color:"rgba(255,255,255,0.4)",marginBottom:6}}>Pódio {type!=="all" && `· ${POINT_TYPES.find(p=>p.id===type)?.name}`}</div>
+            <div className="label" style={{color:"rgba(255,255,255,0.4)",marginBottom:6}}>Pódio {type!=="all" && `· ${(pointRules||POINT_TYPES).find(p=>p.id===type)?.name}`}</div>
             <div className="podium">
               {/* 2nd */}
               {ranking[1] ? (
@@ -1000,7 +1045,7 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
 
         <div className="label mb-2">Tipo de Ponto</div>
         <div className="point-grid mb-4">
-          {pointRules.map(pt=>(
+          {pointRules.filter(p=>!p.archived).map(pt=>(
             <div key={pt.id} className={`point-btn ${selType===pt.id?"selected":""}`} onClick={()=>pickType(pt.id)}>
               <div className="point-btn-icon">{pt.icon}</div>
               <div className="point-btn-name">{pt.name}</div>
@@ -1131,7 +1176,7 @@ function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules }) {
           <div className="stat-card"><div className="stat-val">{weekPts(entries,viewSeller)}</div><div className="stat-lbl">pts semana</div></div>
           <div className="stat-card"><div className="stat-val">{monthPts(entries,viewSeller)}</div><div className="stat-lbl">pts mês</div></div>
           <div className="stat-card"><div className="stat-val">{myEntries.length}</div><div className="stat-lbl">lançamentos</div></div>
-          <div className="stat-card"><div className="stat-val" style={{fontSize:24}}>{POINT_TYPES.sort((a,b)=>{const c=buildStats(entries,viewSeller); return (c[b.id]*b.pts)-(c[a.id]*a.pts);})[0]?.icon}</div><div className="stat-lbl">melhor cat.</div></div>
+          <div className="stat-card"><div className="stat-val" style={{fontSize:24}}>{[...((pointRules||POINT_TYPES).filter(p=>!p.archived))].sort((a,b)=>{const c=buildStats(entries,viewSeller,(pointRules||POINT_TYPES)); return (c[b.id]*b.pts)-(c[a.id]*a.pts);})[0]?.icon}</div><div className="stat-lbl">melhor cat.</div></div>
         </div>
       </div>
 
@@ -1471,6 +1516,7 @@ export default function App() {
   const [confetti, setConfetti] = useState(false);
   const [showPointConfig, setShowPointConfig] = useState(false);
   const [draftRules, setDraftRules] = useState(POINT_TYPES);
+  const [showArchivedRules, setShowArchivedRules] = useState(false);
   const toastRef = useRef(null);
   const loadedRef = useRef(false);
   const syncTimer = useRef(null);
@@ -1485,17 +1531,7 @@ export default function App() {
       setCampaigns(data.campaigns || []);
       setEntries(data.entries || []);
       setSnapshots(data.snapshots || {});
-      const storedPts = data.pointRulesMap || {};
-      const merged = POINT_TYPES.map(p => {
-        const s = storedPts[p.id];
-        const parsed = (typeof s === "number") ? { pts: s } : (s || {});
-        const rule = { ...p, ...parsed };
-        if (rule.id === "accessories" && rule.mode !== "accum") {
-          rule.mode = "accum"; rule.threshold = 5000; rule.unit = "R$";
-        }
-        return rule;
-      });
-      setPointRules(merged);
+      setPointRules(normalizePointRules(data.pointRulesMap));
       loadedRef.current = true;
       setLoading(false);
       // Restore remembered session
@@ -1527,13 +1563,7 @@ export default function App() {
   useEffect(() => { if (loadedRef.current) { api.save(DB_KEYS.entries, entries); flashSync(); } }, [entries]);
   useEffect(() => { if (loadedRef.current) { api.save(DB_KEYS.snapshots, snapshots); } }, [snapshots]);
   useEffect(() => {
-    if (loadedRef.current) {
-      const map = {};
-      pointRules.forEach(r => {
-        map[r.id] = { pts: r.pts, mode: r.mode || "unit", threshold: r.threshold, unit: r.unit };
-      });
-      api.save(DB_KEYS.pointRules, map);
-    }
+    if (loadedRef.current) api.save(DB_KEYS.pointRules, pointRules);
   }, [pointRules]);
 
   // ── Record a daily rank snapshot (once per day, on data change) ──
@@ -1696,66 +1726,125 @@ export default function App() {
       <Confetti show={confetti} />
       <Toast msg={toast} show={showToastFlag} />
 
-      {showPointConfig && (
+      {showPointConfig && (() => {
+        const patchRule = (id, changes) => setDraftRules(prev => prev.map(r => r.id===id ? {...r, ...changes} : r));
+        const setArchived = (id, val) => patchRule(id, { archived: val });
+        const addRule = () => {
+          const newRule = { id: uid("m"), name: "", icon: "🔥", pts: 1, mode: "unit" };
+          setDraftRules(prev => [...prev, newRule]);
+        };
+        const isValid = (r) => (r.name||"").trim() && (r.icon||"").trim() && r.pts >= 1
+          && (r.mode !== "accum" || (r.threshold >= 1));
+        const active = draftRules.filter(r => !r.archived);
+        const archived = draftRules.filter(r => r.archived);
+        const allValid = active.every(isValid);
+        return (
         <div className="modal-bg" style={{zIndex:200}} onClick={e=>e.target===e.currentTarget&&setShowPointConfig(false)}>
           <div className="modal">
             <div className="modal-handle" />
-            <div className="title mb-1">⚙️ Sistema de Pontuação</div>
-            <div style={{fontSize:12,color:"var(--text3)",marginBottom:18}}>Defina quantos pontos vale cada tipo de ação</div>
-            {draftRules.map((pt,i)=>{
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div className="title">⚙️ Sistema de Pontuação</div>
+            </div>
+            <div style={{fontSize:12,color:"var(--text3)",marginBottom:14}}>Personalize as métricas usadas para pontuar os vendedores</div>
+
+            {active.map(pt => {
               const mode = pt.mode || "unit";
-              const patch = (changes) => setDraftRules(prev=>prev.map((r,idx)=>idx===i?{...r,...changes}:r));
+              const protectedId = ACHIEVEMENT_PROTECTED_IDS.includes(pt.id);
+              const valid = isValid(pt);
               return (
-                <div key={pt.id} className="rule-config" style={{marginBottom:14,padding:12,background:"var(--bg2)",borderRadius:12}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <span style={{fontSize:22,width:28,textAlign:"center",flexShrink:0}}>{pt.icon}</span>
-                    <div style={{flex:1,fontSize:14,fontWeight:600,color:"var(--text)",lineHeight:1.2}}>{pt.name}</div>
-                    <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>patch({pts:Math.max(1,pt.pts-1)})}>−</button>
-                    <div style={{width:38,textAlign:"center",fontFamily:"Barlow Condensed,sans-serif",fontSize:24,fontWeight:900,color:"var(--ib-orange)",flexShrink:0}}>{pt.pts}</div>
-                    <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>patch({pts:pt.pts+1})}>+</button>
-                    <span style={{fontSize:11,fontWeight:600,color:"var(--text3)",width:20,flexShrink:0}}>pts</span>
+                <div key={pt.id} className={`rule-card ${!valid?"invalid":""}`}>
+                  <div className="rule-header">
+                    <input
+                      className="input rule-icon-input"
+                      value={pt.icon||""}
+                      onChange={e=>patchRule(pt.id,{icon:e.target.value})}
+                      maxLength={4}
+                      placeholder="🎯"
+                    />
+                    <input
+                      className="input rule-name-input"
+                      value={pt.name||""}
+                      onChange={e=>patchRule(pt.id,{name:e.target.value})}
+                      placeholder="Nome da métrica"
+                    />
+                    {protectedId && <span className="chip-achievement" title="ID usado por conquistas">🏆</span>}
+                    <button
+                      className="rule-archive-btn"
+                      onClick={()=>setArchived(pt.id, true)}
+                      title="Arquivar"
+                    >📁</button>
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginTop:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <button className="btn btn-ghost" style={{width:32,height:32,padding:0,fontSize:18,flexShrink:0}} onClick={()=>patchRule(pt.id,{pts:Math.max(1,pt.pts-1)})}>−</button>
+                    <div style={{width:36,textAlign:"center",fontFamily:"Barlow Condensed,sans-serif",fontSize:22,fontWeight:900,color:"var(--ib-orange)",flexShrink:0}}>{pt.pts}</div>
+                    <button className="btn btn-ghost" style={{width:32,height:32,padding:0,fontSize:18,flexShrink:0}} onClick={()=>patchRule(pt.id,{pts:pt.pts+1})}>+</button>
+                    <span style={{fontSize:11,fontWeight:600,color:"var(--text3)",marginRight:6}}>pts</span>
                     <button
                       className={`mode-tab ${mode==="unit"?"active":""}`}
-                      onClick={()=>patch({mode:"unit"})}
+                      onClick={()=>patchRule(pt.id,{mode:"unit"})}
                     >Unitário</button>
                     <button
                       className={`mode-tab ${mode==="accum"?"active":""}`}
-                      onClick={()=>patch({mode:"accum", threshold: pt.threshold || 5000, unit: pt.unit || "R$"})}
+                      onClick={()=>patchRule(pt.id,{mode:"accum", threshold: pt.threshold || 5000, unit: pt.unit || "R$"})}
                     >Acumulador</button>
-                    {mode==="accum" && (
-                      <>
-                        <input
-                          className="input"
-                          style={{flex:1,padding:"6px 10px",fontSize:13,minWidth:0}}
-                          inputMode="decimal"
-                          value={pt.threshold ?? ""}
-                          onChange={e=>patch({threshold: Math.max(1, parseInt(e.target.value)||0)})}
-                          placeholder="Meta"
-                        />
-                        <input
-                          className="input"
-                          style={{width:50,padding:"6px 8px",fontSize:13,textAlign:"center"}}
-                          value={pt.unit ?? ""}
-                          onChange={e=>patch({unit: e.target.value})}
-                          placeholder="R$"
-                        />
-                      </>
-                    )}
                   </div>
                   {mode==="accum" && (
-                    <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>
-                      Cada {pt.unit||""} {pt.threshold||0} acumulados = +{pt.pts} pts
+                    <div style={{display:"flex",gap:6,marginTop:8}}>
+                      <input
+                        className="input"
+                        style={{flex:1,padding:"6px 10px",fontSize:13,minWidth:0}}
+                        inputMode="decimal"
+                        value={pt.threshold ?? ""}
+                        onChange={e=>patchRule(pt.id,{threshold: Math.max(1, parseInt(e.target.value)||0)})}
+                        placeholder="Meta"
+                      />
+                      <input
+                        className="input"
+                        style={{width:60,padding:"6px 8px",fontSize:13,textAlign:"center"}}
+                        value={pt.unit ?? ""}
+                        onChange={e=>patchRule(pt.id,{unit: e.target.value})}
+                        placeholder="R$"
+                      />
                     </div>
                   )}
+                  {mode==="accum" && pt.threshold>0 && (
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>
+                      Cada {pt.unit||""} {pt.threshold} acumulados = +{pt.pts} pts
+                    </div>
+                  )}
+                  <div className="rule-id">id: {pt.id}</div>
                 </div>
               );
             })}
-            <button className="btn btn-grad mt-2" onClick={()=>{setPointRules(draftRules);setShowPointConfig(false);}}>Salvar</button>
+
+            <button className="add-rule-btn mt-2" onClick={addRule}>+ Nova métrica</button>
+
+            {archived.length > 0 && (
+              <div className="archived-section">
+                <button className="archived-toggle" onClick={()=>setShowArchivedRules(v=>!v)}>
+                  {showArchivedRules ? "▾" : "▸"} Arquivadas ({archived.length})
+                </button>
+                {showArchivedRules && archived.map(pt => (
+                  <div key={pt.id} className="archived-rule">
+                    <span style={{fontSize:18,width:24,textAlign:"center"}}>{pt.icon}</span>
+                    <div style={{flex:1,fontSize:13,fontWeight:600}}>{pt.name}</div>
+                    <button className="btn btn-ghost" style={{fontSize:11,padding:"4px 10px"}} onClick={()=>setArchived(pt.id, false)}>Reativar</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              className="btn btn-grad mt-3"
+              disabled={!allValid}
+              style={{opacity: allValid ? 1 : 0.4}}
+              onClick={()=>{setPointRules(draftRules);setShowPointConfig(false);}}
+            >Salvar</button>
+            {!allValid && <div style={{fontSize:11,color:"#d33",marginTop:6,textAlign:"center"}}>Há métricas com nome, ícone ou meta inválidos</div>}
           </div>
         </div>
-      )}
+        );
+      })()}
       <div className={`sync-dot ${syncing?"show":""}`}><div className="sync-spin" /> salvando</div>
       <div className="app">
         {renderPage()}
