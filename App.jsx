@@ -322,6 +322,21 @@ const CSS = `
   .rk-det-pts { color: var(--ib-orange); font-weight: 800; margin-left: 8px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; }
   .rk-det-row.zero { opacity: 0.45; }
   .rk-det-empty { text-align: center; padding: 12px 8px; font-size: 12px; color: var(--text3); }
+  .rk-det-row.accum { align-items: flex-start; padding: 10px 0; }
+  .rk-det-row.accum .rk-det-icon { padding-top: 2px; }
+
+  /* accumulator widget */
+  .accum-card { background: var(--bg2); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  .accum-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+  .accum-progress { height: 8px; }
+  .accum-progress.thin { height: 4px; }
+
+  /* parcial badge for accum entries with no pts yet */
+  .entry-parcial { font-size: 9px; padding: 3px 7px; border-radius: 4px; background: var(--bg2); color: var(--text3); font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* mode tabs in point config modal */
+  .mode-tab { background: var(--bg2); border: 1px solid var(--border); color: var(--text2); padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+  .mode-tab.active { background: var(--ib-grad); color: white; border-color: transparent; }
 
   /* ── LOADING / SYNC ── */
   .loading-bg { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg); gap: 20px; }
@@ -339,12 +354,12 @@ const CSS = `
 
 // ─── DATA ──────────────────────────────────────────────────────────────────────
 const POINT_TYPES = [
-  { id: "online", name: "Venda Online", icon: "🛒", pts: 1 },
-  { id: "organic", name: "Venda Orgânica", icon: "🤝", pts: 3 },
-  { id: "google", name: "Avaliação Google", icon: "⭐", pts: 1 },
-  { id: "video", name: "Depoimento Vídeo", icon: "🎬", pts: 2 },
-  { id: "accessories", name: "Acessórios R$5k", icon: "🎒", pts: 5 },
-  { id: "tiktok", name: "Venda TikTok", icon: "🎵", pts: 10 },
+  { id: "online", name: "Venda Online", icon: "🛒", pts: 1, mode: "unit" },
+  { id: "organic", name: "Venda Orgânica", icon: "🤝", pts: 3, mode: "unit" },
+  { id: "google", name: "Avaliação Google", icon: "⭐", pts: 1, mode: "unit" },
+  { id: "video", name: "Depoimento Vídeo", icon: "🎬", pts: 2, mode: "unit" },
+  { id: "accessories", name: "Acessórios", icon: "🎒", pts: 5, mode: "accum", threshold: 5000, unit: "R$" },
+  { id: "tiktok", name: "Venda TikTok", icon: "🎵", pts: 10, mode: "unit" },
 ];
 
 const ACHIEVEMENTS_DEF = [
@@ -466,6 +481,29 @@ function buildRanking(sellers, filtered) {
   rows.sort((a, b) => b.total - a.total || b.organic - a.organic || a.lastTs - b.lastTs);
   return rows.map((s, i) => ({ ...s, rank: i + 1 }));
 }
+
+// Estado do acumulador de uma regra accum para um vendedor na campanha ativa
+function getAccumState(entries, sid, ruleId, campaignId, rule) {
+  const mine = entries.filter(e =>
+    e.sellerId === sid && e.type === ruleId && (e.campaignId ?? null) === (campaignId ?? null)
+  );
+  const accum = mine.reduce((a, e) => a + (e.value || 0), 0);
+  const ptsAwarded = mine.reduce((a, e) => a + (e.pts || 0), 0);
+  const threshold = rule.threshold || 1;
+  const progress = accum % threshold;
+  const toNext = threshold - progress;
+  return { accum, ptsAwarded, threshold, progress, toNext };
+}
+
+// Quantos pts esse lançamento (de valor V) vai conceder dado o estado atual
+function computeAccumPts(state, value, rule) {
+  const totalAfter = state.accum + value;
+  const crossingsAfter = Math.floor(totalAfter / state.threshold);
+  const crossingsBefore = Math.floor(state.accum / state.threshold);
+  return (crossingsAfter - crossingsBefore) * rule.pts;
+}
+
+const fmtBR = (n) => (n ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // Breakdown por tipo respeitando período/campanha (ignora filtro de type)
 function buildBreakdown(entries, sid, { period, campaignId }) {
@@ -670,8 +708,9 @@ function Dashboard({ user, sellers, entries, campaigns, pointRules }) {
         <div className="section-title">Últimos Pontos</div>
         <div className="card">
           {entries.filter(e=>e.sellerId===user.id).slice(-5).reverse().map(e=>{
-            const pt = POINT_TYPES.find(p=>p.id===e.type);
-            return <div key={e.id} className="history-item"><div className="history-icon">{pt?.icon}</div><div className="history-info"><div className="history-action">{pt?.name}</div><div className="history-meta">{fmtDate(e.date)}</div></div><div className="history-pts">+{e.pts}</div></div>;
+            const pt = (pointRules||[]).find(p=>p.id===e.type) || POINT_TYPES.find(p=>p.id===e.type);
+            const hasValue = e.value != null;
+            return <div key={e.id} className="history-item"><div className="history-icon">{pt?.icon}</div><div className="history-info"><div className="history-action">{pt?.name}{hasValue && <span style={{fontWeight:600,color:"var(--text2)",marginLeft:6}}>· {pt?.unit||""} {fmtBR(e.value)}</span>}</div><div className="history-meta">{fmtDate(e.date)}</div></div>{e.pts>0 ? <div className="history-pts">+{e.pts}</div> : <div className="entry-parcial">parcial</div>}</div>;
           })}
           {entries.filter(e=>e.sellerId===user.id).length===0 && <div className="empty"><div className="empty-icon">📭</div><div>Nenhum ponto ainda</div></div>}
         </div>
@@ -844,6 +883,29 @@ function Ranking({ user, sellers, entries, campaigns, snapshots, pointRules }) {
                     <div className="rk-det-empty">Sem lançamentos neste período</div>
                   ) : metrics.map(pt => {
                     const b = breakdown[pt.id] || { count: 0, pts: 0 };
+                    if (pt.mode === "accum") {
+                      const st = getAccumState(entries, s.id, pt.id, activeCampaign?.id ?? null, pt);
+                      const pct = Math.min(100, (st.progress / st.threshold) * 100);
+                      const zero = st.accum === 0;
+                      return (
+                        <div key={pt.id} className={`rk-det-row accum ${zero?"zero":""}`}>
+                          <div className="rk-det-icon">{pt.icon}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <div className="rk-det-name">{pt.name}</div>
+                              <div className="rk-det-val">{pt.unit||""} {fmtBR(st.accum)}</div>
+                              <div className="rk-det-pts">+{st.ptsAwarded} pts</div>
+                            </div>
+                            <div className="progress-wrap accum-progress thin" style={{marginTop:6}}>
+                              <div className="progress-fill" style={{width:`${pct}%`,height:"100%"}} />
+                            </div>
+                            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>
+                              {pt.unit||""} {fmtBR(st.progress)} / {pt.unit||""} {fmtBR(st.threshold)} para próximo +{pt.pts}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
                     const unit = b.count === 1 ? "lançamento" : "lançamentos";
                     return (
                       <div key={pt.id} className={`rk-det-row ${b.count===0?"zero":""}`}>
@@ -871,20 +933,51 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
   const [selSeller, setSelSeller] = useState("");
   const [selType, setSelType] = useState(null);
   const [note, setNote] = useState("");
+  const [valueStr, setValueStr] = useState("");
   const [loading, setLoading] = useState(false);
   const activeCampaign = campaigns.find(c=>c.status==="active");
+  const selRule = pointRules.find(p=>p.id===selType) || null;
+  const isAccum = selRule?.mode === "accum";
+  const parsedValue = parseFloat((valueStr||"").replace(/\./g,"").replace(",","."));
+  const validValue = !isNaN(parsedValue) && parsedValue > 0;
+  const accumState = (isAccum && selSeller) ? getAccumState(entries, selSeller, selType, activeCampaign?.id ?? null, selRule) : null;
+  const previewPts = (isAccum && accumState && validValue) ? computeAccumPts(accumState, parsedValue, selRule) : 0;
+  const accumPct = accumState ? Math.min(100, (accumState.progress / accumState.threshold) * 100) : 0;
+
+  function pickType(id) {
+    setSelType(id);
+    setValueStr("");
+  }
 
   function confirm() {
     if (!selSeller||!selType) return;
+    if (isAccum && !validValue) return;
     setLoading(true);
-    const pt = pointRules.find(p=>p.id===selType);
     const seller = sellers.find(s=>s.id===selSeller);
     setTimeout(()=>{
-      const entry = { id:uid("e"), sellerId:selSeller, campaignId:activeCampaign?.id||null, type:selType, pts:pt.pts, note, date:new Date().toISOString(), addedBy:user.id };
+      const ptsAwarded = isAccum ? previewPts : selRule.pts;
+      const entry = {
+        id: uid("e"), sellerId: selSeller, campaignId: activeCampaign?.id||null,
+        type: selType, pts: ptsAwarded, note,
+        date: new Date().toISOString(), addedBy: user.id,
+        ...(isAccum ? { value: parsedValue } : {}),
+      };
       setEntries(prev=>[...prev,entry]);
-      showToast({title:`+${pt.pts} pts para ${seller.name.split(" ")[0]}`, sub:`por ${pt.name}`});
-      showConfetti();
-      setSelSeller(""); setSelType(null); setNote(""); setLoading(false);
+      if (isAccum) {
+        const unit = selRule.unit || "";
+        if (ptsAwarded > 0) {
+          showToast({ title: `+${ptsAwarded} pts para ${seller.name.split(" ")[0]}`, sub: `${selRule.name} · ${unit} ${fmtBR(parsedValue)}` });
+          showConfetti();
+        } else {
+          const stateAfter = { ...accumState, accum: accumState.accum + parsedValue };
+          const toNext = stateAfter.threshold - (stateAfter.accum % stateAfter.threshold);
+          showToast({ title: `${unit} ${fmtBR(parsedValue)} registrado`, sub: `faltam ${unit} ${fmtBR(toNext)} para +${selRule.pts} pts` });
+        }
+      } else {
+        showToast({ title: `+${selRule.pts} pts para ${seller.name.split(" ")[0]}`, sub: `por ${selRule.name}` });
+        showConfetti();
+      }
+      setSelSeller(""); setSelType(null); setNote(""); setValueStr(""); setLoading(false);
     },600);
   }
 
@@ -908,29 +1001,73 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
         <div className="label mb-2">Tipo de Ponto</div>
         <div className="point-grid mb-4">
           {pointRules.map(pt=>(
-            <div key={pt.id} className={`point-btn ${selType===pt.id?"selected":""}`} onClick={()=>setSelType(pt.id)}>
+            <div key={pt.id} className={`point-btn ${selType===pt.id?"selected":""}`} onClick={()=>pickType(pt.id)}>
               <div className="point-btn-icon">{pt.icon}</div>
               <div className="point-btn-name">{pt.name}</div>
-              <div className="point-btn-pts">+{pt.pts} pts</div>
+              <div className="point-btn-pts">{pt.mode==="accum" ? `+${pt.pts} pts/${pt.unit||""}${pt.threshold}` : `+${pt.pts} pts`}</div>
             </div>
           ))}
         </div>
 
+        {isAccum && selSeller && (
+          <>
+            <div className="label mb-2">Valor da venda ({selRule.unit || ""})</div>
+            <input
+              className="input mb-3"
+              inputMode="decimal"
+              placeholder={`Ex: ${selRule.unit||""} 1.500,00`}
+              value={valueStr}
+              onChange={e=>setValueStr(e.target.value)}
+            />
+            {accumState && (
+              <div className="accum-card mb-3">
+                <div className="accum-row">
+                  <span>Acumulado na campanha</span>
+                  <span className="fw-700">{selRule.unit||""} {fmtBR(accumState.accum)}</span>
+                </div>
+                <div className="progress-wrap accum-progress"><div className="progress-fill" style={{width:`${accumPct}%`,height:"100%"}} /></div>
+                <div className="accum-row" style={{marginTop:6,marginBottom:0}}>
+                  <span>Faltam {selRule.unit||""} {fmtBR(accumState.toNext)}</span>
+                  <span>para +{selRule.pts} pts</span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
         <div className="label mb-2">Observação (opcional)</div>
         <input className="input mb-4" placeholder="Ex: venda no Instagram..." value={note} onChange={e=>setNote(e.target.value)} />
 
-        {selSeller && selType && (
+        {selSeller && selType && !isAccum && (
           <div className="card mb-3" style={{borderLeft:"4px solid var(--ib-orange)"}}>
             <div className="text-sm fw-700">Confirmar lançamento</div>
             <div className="text-sm text-muted mt-2">
-              {sellers.find(s=>s.id===selSeller)?.name} → {pointRules.find(p=>p.id===selType)?.name} (+{pointRules.find(p=>p.id===selType)?.pts} pts)
+              {sellers.find(s=>s.id===selSeller)?.name} → {selRule.name} (+{selRule.pts} pts)
             </div>
           </div>
         )}
 
-        <button className={`btn btn-grad ${(!selSeller||!selType)?"":"pulse-btn"}`} onClick={confirm} disabled={!selSeller||!selType||loading} style={{opacity:(!selSeller||!selType)?0.4:1}}>
-          {loading ? "Lançando..." : "✅ Confirmar Pontos"}
-        </button>
+        {isAccum && selSeller && validValue && accumState && (
+          <div className="card mb-3" style={{borderLeft:"4px solid var(--ib-orange)"}}>
+            <div className="text-sm fw-700">Esta venda</div>
+            <div className="text-sm text-muted mt-2">
+              {selRule.unit||""} {fmtBR(parsedValue)} → soma {selRule.unit||""} {fmtBR(accumState.accum + parsedValue)}
+              {previewPts > 0
+                ? <> · <span style={{color:"var(--ib-orange)",fontWeight:800}}>+{previewPts} pts</span></>
+                : <> · <span style={{color:"var(--text3)"}}>sem pts (parcial)</span></>
+              }
+            </div>
+          </div>
+        )}
+
+        {(() => {
+          const canSubmit = selSeller && selType && (!isAccum || validValue);
+          return (
+            <button className={`btn btn-grad ${canSubmit?"pulse-btn":""}`} onClick={confirm} disabled={!canSubmit||loading} style={{opacity:canSubmit?1:0.4}}>
+              {loading ? "Lançando..." : isAccum ? "✅ Confirmar Venda" : "✅ Confirmar Pontos"}
+            </button>
+          );
+        })()}
         </>)}
       </div>
     </div>
@@ -938,7 +1075,7 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
 }
 
 // ─── PROFILE ───────────────────────────────────────────────────────────────────
-function Profile({ user, sellers, entries, setEntries, isAdmin }) {
+function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules }) {
   const [viewSeller, setViewSeller] = useState(user.role==="admin" ? null : user.id);
   const ranking = getRanking(sellers, entries, null);
 
@@ -1029,13 +1166,13 @@ function Profile({ user, sellers, entries, setEntries, isAdmin }) {
         <div className="card">
           {myEntries.length===0 && <div className="empty"><div className="empty-icon">📭</div><div>Sem lançamentos</div></div>}
           {myEntries.map(e=>{
-            const pt = POINT_TYPES.find(p=>p.id===e.type);
+            const pt = (pointRules||[]).find(p=>p.id===e.type) || POINT_TYPES.find(p=>p.id===e.type);
             return (
               <div key={e.id} className="history-item">
                 <div className="history-icon">{pt?.icon}</div>
-                <div className="history-info"><div className="history-action">{pt?.name}</div><div className="history-meta">{fmtDate(e.date)}{e.note&&` · ${e.note}`}</div></div>
+                <div className="history-info"><div className="history-action">{pt?.name}{e.value!=null && <span style={{fontWeight:600,color:"var(--text2)",marginLeft:6}}>· {pt?.unit||""} {fmtBR(e.value)}</span>}</div><div className="history-meta">{fmtDate(e.date)}{e.note&&` · ${e.note}`}</div></div>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-                  <div className="history-pts">+{e.pts}</div>
+                  {e.pts>0 ? <div className="history-pts">+{e.pts}</div> : <div className="entry-parcial">parcial</div>}
                   {isAdmin && <button className="btn btn-danger" onClick={()=>setEntries(prev=>prev.filter(x=>x.id!==e.id))}>✕</button>}
                 </div>
               </div>
@@ -1348,8 +1485,16 @@ export default function App() {
       setCampaigns(data.campaigns || []);
       setEntries(data.entries || []);
       setSnapshots(data.snapshots || {});
-      const storedPts = data.pointRulesMap;
-      const merged = POINT_TYPES.map(p => ({ ...p, pts: storedPts?.[p.id] ?? p.pts }));
+      const storedPts = data.pointRulesMap || {};
+      const merged = POINT_TYPES.map(p => {
+        const s = storedPts[p.id];
+        const parsed = (typeof s === "number") ? { pts: s } : (s || {});
+        const rule = { ...p, ...parsed };
+        if (rule.id === "accessories" && rule.mode !== "accum") {
+          rule.mode = "accum"; rule.threshold = 5000; rule.unit = "R$";
+        }
+        return rule;
+      });
       setPointRules(merged);
       loadedRef.current = true;
       setLoading(false);
@@ -1384,7 +1529,9 @@ export default function App() {
   useEffect(() => {
     if (loadedRef.current) {
       const map = {};
-      pointRules.forEach(r => { map[r.id] = r.pts; });
+      pointRules.forEach(r => {
+        map[r.id] = { pts: r.pts, mode: r.mode || "unit", threshold: r.threshold, unit: r.unit };
+      });
       api.save(DB_KEYS.pointRules, map);
     }
   }, [pointRules]);
@@ -1516,13 +1663,13 @@ export default function App() {
                 <div className="section-title mt-3">Últimos Lançamentos</div>
                 <div className="card">
                   {[...entries].reverse().slice(0,8).map(e=>{
-                    const pt=POINT_TYPES.find(p=>p.id===e.type); const sel=sellers.find(s=>s.id===e.sellerId);
+                    const pt=pointRules.find(p=>p.id===e.type) || POINT_TYPES.find(p=>p.id===e.type); const sel=sellers.find(s=>s.id===e.sellerId);
                     return (
                       <div key={e.id} className="history-item">
                         <div className="history-icon">{pt?.icon}</div>
-                        <div className="history-info"><div className="history-action">{sel?.name} · {pt?.name}</div><div className="history-meta">{fmtDate(e.date)}</div></div>
+                        <div className="history-info"><div className="history-action">{sel?.name} · {pt?.name}{e.value!=null && <span style={{fontWeight:600,color:"var(--text2)",marginLeft:6}}>· {pt?.unit||""} {fmtBR(e.value)}</span>}</div><div className="history-meta">{fmtDate(e.date)}</div></div>
                         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-                          <div className="history-pts">+{e.pts}</div>
+                          {e.pts>0 ? <div className="history-pts">+{e.pts}</div> : <div className="entry-parcial">parcial</div>}
                           <button className="btn btn-danger" onClick={()=>setEntries(prev=>prev.filter(x=>x.id!==e.id))}>✕</button>
                         </div>
                       </div>
@@ -1536,7 +1683,7 @@ export default function App() {
         return <Dashboard user={user} sellers={sellers} entries={entries} campaigns={campaigns} pointRules={pointRules} />;
       case "ranking": return <Ranking user={user} sellers={sellers} entries={entries} campaigns={campaigns} snapshots={snapshots} pointRules={pointRules} />;
       case "launch": return <LaunchPoints user={user} sellers={sellers} entries={entries} setEntries={setEntries} campaigns={campaigns} showToast={triggerToast} showConfetti={triggerConfetti} pointRules={pointRules} />;
-      case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} />;
+      case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} pointRules={pointRules} />;
       case "vendors": return <VendorManagement sellers={sellers} setSellers={setSellers} />;
       case "campaigns": return <Campaigns campaigns={campaigns} setCampaigns={setCampaigns} sellers={sellers} entries={entries} isAdmin={isAdmin} />;
       default: return null;
@@ -1555,16 +1702,56 @@ export default function App() {
             <div className="modal-handle" />
             <div className="title mb-1">⚙️ Sistema de Pontuação</div>
             <div style={{fontSize:12,color:"var(--text3)",marginBottom:18}}>Defina quantos pontos vale cada tipo de ação</div>
-            {draftRules.map((pt,i)=>(
-              <div key={pt.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-                <span style={{fontSize:22,width:28,textAlign:"center",flexShrink:0}}>{pt.icon}</span>
-                <div style={{flex:1,fontSize:14,fontWeight:600,color:"var(--text)",lineHeight:1.2}}>{pt.name}</div>
-                <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>setDraftRules(prev=>prev.map((r,idx)=>idx===i?{...r,pts:Math.max(1,r.pts-1)}:r))}>−</button>
-                <div style={{width:38,textAlign:"center",fontFamily:"Barlow Condensed,sans-serif",fontSize:24,fontWeight:900,color:"var(--ib-orange)",flexShrink:0}}>{pt.pts}</div>
-                <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>setDraftRules(prev=>prev.map((r,idx)=>idx===i?{...r,pts:r.pts+1}:r))}>+</button>
-                <span style={{fontSize:11,fontWeight:600,color:"var(--text3)",width:20,flexShrink:0}}>pts</span>
-              </div>
-            ))}
+            {draftRules.map((pt,i)=>{
+              const mode = pt.mode || "unit";
+              const patch = (changes) => setDraftRules(prev=>prev.map((r,idx)=>idx===i?{...r,...changes}:r));
+              return (
+                <div key={pt.id} className="rule-config" style={{marginBottom:14,padding:12,background:"var(--bg2)",borderRadius:12}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:22,width:28,textAlign:"center",flexShrink:0}}>{pt.icon}</span>
+                    <div style={{flex:1,fontSize:14,fontWeight:600,color:"var(--text)",lineHeight:1.2}}>{pt.name}</div>
+                    <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>patch({pts:Math.max(1,pt.pts-1)})}>−</button>
+                    <div style={{width:38,textAlign:"center",fontFamily:"Barlow Condensed,sans-serif",fontSize:24,fontWeight:900,color:"var(--ib-orange)",flexShrink:0}}>{pt.pts}</div>
+                    <button className="btn btn-ghost" style={{width:34,height:34,padding:0,fontSize:20,flexShrink:0}} onClick={()=>patch({pts:pt.pts+1})}>+</button>
+                    <span style={{fontSize:11,fontWeight:600,color:"var(--text3)",width:20,flexShrink:0}}>pts</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginTop:10}}>
+                    <button
+                      className={`mode-tab ${mode==="unit"?"active":""}`}
+                      onClick={()=>patch({mode:"unit"})}
+                    >Unitário</button>
+                    <button
+                      className={`mode-tab ${mode==="accum"?"active":""}`}
+                      onClick={()=>patch({mode:"accum", threshold: pt.threshold || 5000, unit: pt.unit || "R$"})}
+                    >Acumulador</button>
+                    {mode==="accum" && (
+                      <>
+                        <input
+                          className="input"
+                          style={{flex:1,padding:"6px 10px",fontSize:13,minWidth:0}}
+                          inputMode="decimal"
+                          value={pt.threshold ?? ""}
+                          onChange={e=>patch({threshold: Math.max(1, parseInt(e.target.value)||0)})}
+                          placeholder="Meta"
+                        />
+                        <input
+                          className="input"
+                          style={{width:50,padding:"6px 8px",fontSize:13,textAlign:"center"}}
+                          value={pt.unit ?? ""}
+                          onChange={e=>patch({unit: e.target.value})}
+                          placeholder="R$"
+                        />
+                      </>
+                    )}
+                  </div>
+                  {mode==="accum" && (
+                    <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>
+                      Cada {pt.unit||""} {pt.threshold||0} acumulados = +{pt.pts} pts
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             <button className="btn btn-grad mt-2" onClick={()=>{setPointRules(draftRules);setShowPointConfig(false);}}>Salvar</button>
           </div>
         </div>
