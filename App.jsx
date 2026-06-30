@@ -354,6 +354,18 @@ const CSS = `
   .archived-toggle { background: transparent; border: none; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--text2); padding: 4px 0; width: 100%; text-align: left; }
   .archived-rule { display: flex; align-items: center; gap: 10px; padding: 8px 0; opacity: 0.7; }
 
+  /* quick adjust panel (seller profile, admin) */
+  .qa-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border2); }
+  .qa-row:last-child { border-bottom: none; }
+  .qa-icon { font-size: 20px; width: 28px; text-align: center; flex-shrink: 0; }
+  .qa-info { flex: 1; min-width: 0; }
+  .qa-name { font-size: 14px; font-weight: 700; }
+  .qa-sub { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .qa-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .qa-count { min-width: 26px; text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 900; color: var(--ib-orange); }
+  .qa-btn { width: 34px; height: 34px; padding: 0; font-size: 18px; flex-shrink: 0; }
+  .qa-accum-input { display: flex; gap: 6px; margin-top: 8px; }
+
   /* ── LOADING / SYNC ── */
   .loading-bg { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg); gap: 20px; }
   .loading-logo { width: 88px; height: 88px; object-fit: contain; animation: logoPulse 1.4s ease-in-out infinite; }
@@ -1120,8 +1132,9 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
 }
 
 // ─── PROFILE ───────────────────────────────────────────────────────────────────
-function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules }) {
+function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules, campaigns, showToast }) {
   const [viewSeller, setViewSeller] = useState(user.role==="admin" ? null : user.id);
+  const [accumInputs, setAccumInputs] = useState({});
   const ranking = getRanking(sellers, entries, null);
 
   if (user.role==="admin" && !viewSeller) {
@@ -1149,6 +1162,34 @@ function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules }) {
   const achievements = checkAchievements(entries, viewSeller);
   const avgPts = sellers.length>0 ? Math.round(entries.reduce((a,e)=>a+e.pts,0)/sellers.filter(s=>s.active).length) : 0;
 
+  // ── Ajuste rápido (admin) ──
+  const activeCampaign = campaigns?.find(c=>c.status==="active");
+  const campId = activeCampaign?.id ?? null;
+  const adjustMetrics = (pointRules||POINT_TYPES).filter(p=>!p.archived);
+  const scopedEntries = (ruleId) => entries.filter(e => e.sellerId===viewSeller && e.type===ruleId && (e.campaignId ?? null) === campId);
+  const addUnit = (rule) => {
+    const entry = { id:uid("e"), sellerId:viewSeller, campaignId:campId, type:rule.id, pts:rule.pts, note:"", date:new Date().toISOString(), addedBy:user.id };
+    setEntries(prev=>[...prev,entry]);
+    showToast?.({ title:`+${rule.pts} pts`, sub:`${rule.name} · ${seller.name.split(" ")[0]}` });
+  };
+  const addAccum = (rule) => {
+    const v = parseFloat((accumInputs[rule.id]||"").replace(/\./g,"").replace(",","."));
+    if (isNaN(v) || v<=0) return;
+    const st = getAccumState(entries, viewSeller, rule.id, campId, rule);
+    const ptsAwarded = computeAccumPts(st, v, rule);
+    const entry = { id:uid("e"), sellerId:viewSeller, campaignId:campId, type:rule.id, pts:ptsAwarded, note:"", value:v, date:new Date().toISOString(), addedBy:user.id };
+    setEntries(prev=>[...prev,entry]);
+    setAccumInputs(prev=>({ ...prev, [rule.id]:"" }));
+    showToast?.({ title: ptsAwarded>0 ? `+${ptsAwarded} pts` : `${rule.unit||""} ${fmtBR(v)} registrado`, sub:`${rule.name} · ${seller.name.split(" ")[0]}` });
+  };
+  const removeLatest = (rule) => {
+    const list = scopedEntries(rule.id);
+    if (!list.length) return;
+    const latest = list.reduce((a,b)=> new Date(a.date) > new Date(b.date) ? a : b);
+    setEntries(prev=>prev.filter(x=>x.id!==latest.id));
+    showToast?.({ title:"Removido", sub:`${rule.name} · ${seller.name.split(" ")[0]}` });
+  };
+
   return (
     <div className="page">
       <div className="header">
@@ -1170,6 +1211,49 @@ function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules }) {
           <div style={{marginTop:10}}><span className="chip chip-grad">#{rank.rank} no ranking</span></div>
         </div>
       </div>
+
+      {isAdmin && viewSeller && (
+        <div className="section">
+          <div className="card">
+            <div className="section-title">⚡ Ajuste Rápido</div>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:-4,marginBottom:8}}>Corrija pontos sem refazer o lançamento</div>
+            {adjustMetrics.map(rule=>{
+              if (rule.mode==="accum") {
+                const st = getAccumState(entries, viewSeller, rule.id, campId, rule);
+                return (
+                  <div key={rule.id} className="qa-row" style={{flexWrap:"wrap"}}>
+                    <div className="qa-icon">{rule.icon}</div>
+                    <div className="qa-info">
+                      <div className="qa-name">{rule.name}</div>
+                      <div className="qa-sub">{rule.unit||""} {fmtBR(st.accum)} acumulado · +{st.ptsAwarded} pts</div>
+                    </div>
+                    <button className="btn btn-ghost qa-btn" onClick={()=>removeLatest(rule)} disabled={scopedEntries(rule.id).length===0} style={{opacity:scopedEntries(rule.id).length===0?0.35:1}}>−</button>
+                    <div className="qa-accum-input" style={{flexBasis:"100%"}}>
+                      <input className="input" style={{flex:1,padding:"6px 10px",fontSize:13,minWidth:0}} inputMode="decimal" placeholder={`${rule.unit||""} valor`} value={accumInputs[rule.id]||""} onChange={e=>setAccumInputs(prev=>({...prev,[rule.id]:e.target.value}))} />
+                      <button className="btn btn-grad" style={{padding:"6px 16px",fontSize:13}} onClick={()=>addAccum(rule)}>Add</button>
+                    </div>
+                  </div>
+                );
+              }
+              const count = scopedEntries(rule.id).length;
+              return (
+                <div key={rule.id} className="qa-row">
+                  <div className="qa-icon">{rule.icon}</div>
+                  <div className="qa-info">
+                    <div className="qa-name">{rule.name}</div>
+                    <div className="qa-sub">{count} × {rule.pts} = {count*rule.pts} pts</div>
+                  </div>
+                  <div className="qa-controls">
+                    <button className="btn btn-ghost qa-btn" onClick={()=>removeLatest(rule)} disabled={count===0} style={{opacity:count===0?0.35:1}}>−</button>
+                    <div className="qa-count">{count}</div>
+                    <button className="btn btn-ghost qa-btn" onClick={()=>addUnit(rule)}>+</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="section">
         <div className="stat-grid">
@@ -1713,7 +1797,7 @@ export default function App() {
         return <Dashboard user={user} sellers={sellers} entries={entries} campaigns={campaigns} pointRules={pointRules} />;
       case "ranking": return <Ranking user={user} sellers={sellers} entries={entries} campaigns={campaigns} snapshots={snapshots} pointRules={pointRules} />;
       case "launch": return <LaunchPoints user={user} sellers={sellers} entries={entries} setEntries={setEntries} campaigns={campaigns} showToast={triggerToast} showConfetti={triggerConfetti} pointRules={pointRules} />;
-      case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} pointRules={pointRules} />;
+      case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} pointRules={pointRules} campaigns={campaigns} showToast={triggerToast} />;
       case "vendors": return <VendorManagement sellers={sellers} setSellers={setSellers} />;
       case "campaigns": return <Campaigns campaigns={campaigns} setCampaigns={setCampaigns} sellers={sellers} entries={entries} isAdmin={isAdmin} />;
       default: return null;
