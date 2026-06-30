@@ -1132,9 +1132,8 @@ function LaunchPoints({ user, sellers, entries, setEntries, campaigns, showToast
 }
 
 // ─── PROFILE ───────────────────────────────────────────────────────────────────
-function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules, campaigns, showToast }) {
+function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules }) {
   const [viewSeller, setViewSeller] = useState(user.role==="admin" ? null : user.id);
-  const [accumInputs, setAccumInputs] = useState({});
   const ranking = getRanking(sellers, entries, null);
 
   if (user.role==="admin" && !viewSeller) {
@@ -1162,34 +1161,6 @@ function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules, camp
   const achievements = checkAchievements(entries, viewSeller);
   const avgPts = sellers.length>0 ? Math.round(entries.reduce((a,e)=>a+e.pts,0)/sellers.filter(s=>s.active).length) : 0;
 
-  // ── Ajuste rápido (admin) ──
-  const activeCampaign = campaigns?.find(c=>c.status==="active");
-  const campId = activeCampaign?.id ?? null;
-  const adjustMetrics = (pointRules||POINT_TYPES).filter(p=>!p.archived);
-  const scopedEntries = (ruleId) => entries.filter(e => e.sellerId===viewSeller && e.type===ruleId && (e.campaignId ?? null) === campId);
-  const addUnit = (rule) => {
-    const entry = { id:uid("e"), sellerId:viewSeller, campaignId:campId, type:rule.id, pts:rule.pts, note:"", date:new Date().toISOString(), addedBy:user.id };
-    setEntries(prev=>[...prev,entry]);
-    showToast?.({ title:`+${rule.pts} pts`, sub:`${rule.name} · ${seller.name.split(" ")[0]}` });
-  };
-  const addAccum = (rule) => {
-    const v = parseFloat((accumInputs[rule.id]||"").replace(/\./g,"").replace(",","."));
-    if (isNaN(v) || v<=0) return;
-    const st = getAccumState(entries, viewSeller, rule.id, campId, rule);
-    const ptsAwarded = computeAccumPts(st, v, rule);
-    const entry = { id:uid("e"), sellerId:viewSeller, campaignId:campId, type:rule.id, pts:ptsAwarded, note:"", value:v, date:new Date().toISOString(), addedBy:user.id };
-    setEntries(prev=>[...prev,entry]);
-    setAccumInputs(prev=>({ ...prev, [rule.id]:"" }));
-    showToast?.({ title: ptsAwarded>0 ? `+${ptsAwarded} pts` : `${rule.unit||""} ${fmtBR(v)} registrado`, sub:`${rule.name} · ${seller.name.split(" ")[0]}` });
-  };
-  const removeLatest = (rule) => {
-    const list = scopedEntries(rule.id);
-    if (!list.length) return;
-    const latest = list.reduce((a,b)=> new Date(a.date) > new Date(b.date) ? a : b);
-    setEntries(prev=>prev.filter(x=>x.id!==latest.id));
-    showToast?.({ title:"Removido", sub:`${rule.name} · ${seller.name.split(" ")[0]}` });
-  };
-
   return (
     <div className="page">
       <div className="header">
@@ -1211,49 +1182,6 @@ function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules, camp
           <div style={{marginTop:10}}><span className="chip chip-grad">#{rank.rank} no ranking</span></div>
         </div>
       </div>
-
-      {isAdmin && viewSeller && (
-        <div className="section">
-          <div className="card">
-            <div className="section-title">⚡ Ajuste Rápido</div>
-            <div style={{fontSize:11,color:"var(--text3)",marginTop:-4,marginBottom:8}}>Corrija pontos sem refazer o lançamento</div>
-            {adjustMetrics.map(rule=>{
-              if (rule.mode==="accum") {
-                const st = getAccumState(entries, viewSeller, rule.id, campId, rule);
-                return (
-                  <div key={rule.id} className="qa-row" style={{flexWrap:"wrap"}}>
-                    <div className="qa-icon">{rule.icon}</div>
-                    <div className="qa-info">
-                      <div className="qa-name">{rule.name}</div>
-                      <div className="qa-sub">{rule.unit||""} {fmtBR(st.accum)} acumulado · +{st.ptsAwarded} pts</div>
-                    </div>
-                    <button className="btn btn-ghost qa-btn" onClick={()=>removeLatest(rule)} disabled={scopedEntries(rule.id).length===0} style={{opacity:scopedEntries(rule.id).length===0?0.35:1}}>−</button>
-                    <div className="qa-accum-input" style={{flexBasis:"100%"}}>
-                      <input className="input" style={{flex:1,padding:"6px 10px",fontSize:13,minWidth:0}} inputMode="decimal" placeholder={`${rule.unit||""} valor`} value={accumInputs[rule.id]||""} onChange={e=>setAccumInputs(prev=>({...prev,[rule.id]:e.target.value}))} />
-                      <button className="btn btn-grad" style={{padding:"6px 16px",fontSize:13}} onClick={()=>addAccum(rule)}>Add</button>
-                    </div>
-                  </div>
-                );
-              }
-              const count = scopedEntries(rule.id).length;
-              return (
-                <div key={rule.id} className="qa-row">
-                  <div className="qa-icon">{rule.icon}</div>
-                  <div className="qa-info">
-                    <div className="qa-name">{rule.name}</div>
-                    <div className="qa-sub">{count} × {rule.pts} = {count*rule.pts} pts</div>
-                  </div>
-                  <div className="qa-controls">
-                    <button className="btn btn-ghost qa-btn" onClick={()=>removeLatest(rule)} disabled={count===0} style={{opacity:count===0?0.35:1}}>−</button>
-                    <div className="qa-count">{count}</div>
-                    <button className="btn btn-ghost qa-btn" onClick={()=>addUnit(rule)}>+</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <div className="section">
         <div className="stat-grid">
@@ -1314,9 +1242,83 @@ function Profile({ user, sellers, entries, setEntries, isAdmin, pointRules, camp
 }
 
 // ─── VENDORS ───────────────────────────────────────────────────────────────────
-function VendorManagement({ sellers, setSellers }) {
+// Reusable quick-adjust panel: per-metric +/- that creates/removes entries for one seller
+function QuickAdjust({ sellerId, sellerName, entries, setEntries, pointRules, campaigns, showToast, userId }) {
+  const [accumInputs, setAccumInputs] = useState({});
+  const activeCampaign = campaigns?.find(c=>c.status==="active");
+  const campId = activeCampaign?.id ?? null;
+  const metrics = (pointRules||POINT_TYPES).filter(p=>!p.archived);
+  const fname = (sellerName||"").split(" ")[0];
+  const scoped = (ruleId) => entries.filter(e => e.sellerId===sellerId && e.type===ruleId && (e.campaignId ?? null) === campId);
+
+  const addUnit = (rule) => {
+    const entry = { id:uid("e"), sellerId, campaignId:campId, type:rule.id, pts:rule.pts, note:"", date:new Date().toISOString(), addedBy:userId };
+    setEntries(prev=>[...prev,entry]);
+    showToast?.({ title:`+${rule.pts} pts`, sub:`${rule.name} · ${fname}` });
+  };
+  const addAccum = (rule) => {
+    const v = parseFloat((accumInputs[rule.id]||"").replace(/\./g,"").replace(",","."));
+    if (isNaN(v) || v<=0) return;
+    const st = getAccumState(entries, sellerId, rule.id, campId, rule);
+    const ptsAwarded = computeAccumPts(st, v, rule);
+    const entry = { id:uid("e"), sellerId, campaignId:campId, type:rule.id, pts:ptsAwarded, note:"", value:v, date:new Date().toISOString(), addedBy:userId };
+    setEntries(prev=>[...prev,entry]);
+    setAccumInputs(prev=>({ ...prev, [rule.id]:"" }));
+    showToast?.({ title: ptsAwarded>0 ? `+${ptsAwarded} pts` : `${rule.unit||""} ${fmtBR(v)} registrado`, sub:`${rule.name} · ${fname}` });
+  };
+  const removeLatest = (rule) => {
+    const list = scoped(rule.id);
+    if (!list.length) return;
+    const latest = list.reduce((a,b)=> new Date(a.date) > new Date(b.date) ? a : b);
+    setEntries(prev=>prev.filter(x=>x.id!==latest.id));
+    showToast?.({ title:"Removido", sub:`${rule.name} · ${fname}` });
+  };
+
+  return (
+    <>
+      {metrics.map(rule=>{
+        if (rule.mode==="accum") {
+          const st = getAccumState(entries, sellerId, rule.id, campId, rule);
+          const count = scoped(rule.id).length;
+          return (
+            <div key={rule.id} className="qa-row" style={{flexWrap:"wrap"}}>
+              <div className="qa-icon">{rule.icon}</div>
+              <div className="qa-info">
+                <div className="qa-name">{rule.name}</div>
+                <div className="qa-sub">{rule.unit||""} {fmtBR(st.accum)} acumulado · +{st.ptsAwarded} pts</div>
+              </div>
+              <button className="btn btn-ghost qa-btn" onClick={()=>removeLatest(rule)} disabled={count===0} style={{opacity:count===0?0.35:1}}>−</button>
+              <div className="qa-accum-input" style={{flexBasis:"100%"}}>
+                <input className="input" style={{flex:1,padding:"6px 10px",fontSize:13,minWidth:0}} inputMode="decimal" placeholder={`${rule.unit||""} valor`} value={accumInputs[rule.id]||""} onChange={e=>setAccumInputs(prev=>({...prev,[rule.id]:e.target.value}))} />
+                <button className="btn btn-grad" style={{padding:"6px 16px",fontSize:13}} onClick={()=>addAccum(rule)}>Add</button>
+              </div>
+            </div>
+          );
+        }
+        const count = scoped(rule.id).length;
+        return (
+          <div key={rule.id} className="qa-row">
+            <div className="qa-icon">{rule.icon}</div>
+            <div className="qa-info">
+              <div className="qa-name">{rule.name}</div>
+              <div className="qa-sub">{count} × {rule.pts} = {count*rule.pts} pts</div>
+            </div>
+            <div className="qa-controls">
+              <button className="btn btn-ghost qa-btn" onClick={()=>removeLatest(rule)} disabled={count===0} style={{opacity:count===0?0.35:1}}>−</button>
+              <div className="qa-count">{count}</div>
+              <button className="btn btn-ghost qa-btn" onClick={()=>addUnit(rule)}>+</button>
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function VendorManagement({ sellers, setSellers, entries, setEntries, pointRules, campaigns, showToast, userId }) {
   const [showForm, setShowForm] = useState(false);
   const [editPhotoId, setEditPhotoId] = useState(null);
+  const [adjustSeller, setAdjustSeller] = useState(null);
   const [form, setForm] = useState({name:"",password:"",avatar:"🧑",photo:""});
   const photoInputRef = useRef(null);
   const editPhotoInputRef = useRef(null);
@@ -1349,6 +1351,7 @@ function VendorManagement({ sellers, setSellers }) {
               <div className="rank-name">{s.name}</div>
               <div style={{fontSize:11,fontWeight:600,color:s.active?"var(--green)":"var(--red)",marginTop:2}}>{s.active?"● Ativo":"● Inativo"}</div>
             </div>
+            <button className="btn btn-grad" style={{fontSize:11,padding:"6px 10px"}} onClick={()=>setAdjustSeller(s)} title="Ajustar pontos">⚡ Pontos</button>
             <button className={`btn ${s.active?"btn-danger":"btn-ghost"}`} style={{fontSize:11}} onClick={()=>setSellers(prev=>prev.map(x=>x.id===s.id?{...x,active:!x.active}:x))}>
               {s.active?"Inativar":"Ativar"}
             </button>
@@ -1411,6 +1414,27 @@ function VendorManagement({ sellers, setSellers }) {
             <div className="label mb-2">Senha</div>
             <input className="input mb-4" type="password" placeholder="Senha de acesso" value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} />
             <button className="btn btn-grad" onClick={saveSeller}>Cadastrar Vendedor</button>
+          </div>
+        </div>
+      )}
+
+      {adjustSeller && (
+        <div className="modal-bg" style={{zIndex:200}} onClick={e=>e.target===e.currentTarget&&setAdjustSeller(null)}>
+          <div className="modal">
+            <div className="modal-handle" />
+            <div className="title mb-1">⚡ Ajustar Pontos</div>
+            <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>{adjustSeller.name} · corrija pontos sem refazer o lançamento</div>
+            <QuickAdjust
+              sellerId={adjustSeller.id}
+              sellerName={adjustSeller.name}
+              entries={entries}
+              setEntries={setEntries}
+              pointRules={pointRules}
+              campaigns={campaigns}
+              showToast={showToast}
+              userId={userId}
+            />
+            <button className="btn btn-grad mt-3" onClick={()=>setAdjustSeller(null)}>Concluir</button>
           </div>
         </div>
       )}
@@ -1797,8 +1821,8 @@ export default function App() {
         return <Dashboard user={user} sellers={sellers} entries={entries} campaigns={campaigns} pointRules={pointRules} />;
       case "ranking": return <Ranking user={user} sellers={sellers} entries={entries} campaigns={campaigns} snapshots={snapshots} pointRules={pointRules} />;
       case "launch": return <LaunchPoints user={user} sellers={sellers} entries={entries} setEntries={setEntries} campaigns={campaigns} showToast={triggerToast} showConfetti={triggerConfetti} pointRules={pointRules} />;
-      case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} pointRules={pointRules} campaigns={campaigns} showToast={triggerToast} />;
-      case "vendors": return <VendorManagement sellers={sellers} setSellers={setSellers} />;
+      case "profile": return <Profile user={user} sellers={sellers} entries={entries} setEntries={setEntries} isAdmin={isAdmin} pointRules={pointRules} />;
+      case "vendors": return <VendorManagement sellers={sellers} setSellers={setSellers} entries={entries} setEntries={setEntries} pointRules={pointRules} campaigns={campaigns} showToast={triggerToast} userId={user.id} />;
       case "campaigns": return <Campaigns campaigns={campaigns} setCampaigns={setCampaigns} sellers={sellers} entries={entries} isAdmin={isAdmin} />;
       default: return null;
     }
